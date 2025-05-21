@@ -68,39 +68,10 @@ Push-Location $buildDir
 
 $imguiBackendsDir = Join-Path $externalBaseDir "imgui_backends"
 
-$files = @{
-    "imgui_impl_sdl2.h"        = "https://raw.githubusercontent.com/ocornut/imgui/docking/backends/imgui_impl_sdl2.h"
-    "imgui_impl_sdl2.cpp"      = "https://raw.githubusercontent.com/ocornut/imgui/docking/backends/imgui_impl_sdl2.cpp"
-    "imgui_impl_opengl3.h"     = "https://raw.githubusercontent.com/ocornut/imgui/docking/backends/imgui_impl_opengl3.h"
-    "imgui_impl_opengl3.cpp"   = "https://raw.githubusercontent.com/ocornut/imgui/docking/backends/imgui_impl_opengl3.cpp"
-}
-
 if (-not (Test-Path $externalBaseDir)) {
     Write-Host "Creating directory: $externalBaseDir"
     New-Item -ItemType Directory -Path $externalBaseDir | Out-Null
 }
-
-if (-not (Test-Path $imguiBackendsDir)) {
-    Write-Host "Creating directory: $imguiBackendsDir"
-    New-Item -ItemType Directory -Path $imguiBackendsDir | Out-Null
-}
-
-foreach ($fileName in $files.Keys) {
-    $filePath = Join-Path $imguiBackendsDir $fileName
-    if (-not (Test-Path $filePath)) {
-        Write-Host "Downloading $fileName ..."
-        try {
-            Invoke-WebRequest -Uri $files[$fileName] -OutFile $filePath -UseBasicParsing
-            Write-Host "$fileName downloaded successfully."
-        }
-        catch {
-            Write-Warning "Failed to download $fileName from $($files[$fileName])"
-        }
-    } else {
-        Write-Host "$fileName already exists, skipping download."
-    }
-}
-
 
 
 cmake $rootDir `

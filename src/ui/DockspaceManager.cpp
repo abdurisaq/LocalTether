@@ -1,5 +1,6 @@
 #include "ui/DockspaceManager.h"
 #include "utils/Logger.h"
+#include "ui/UIState.h"
 
 namespace LocalTether::UI {
     void DockspaceManager::CreateDockspace(bool* p_open) 
@@ -80,17 +81,11 @@ namespace LocalTether::UI {
             
             if (ImGui::BeginMenu("View"))
             {
-                extern bool show_file_explorer;
-                extern bool show_example_panel;
-                extern bool show_network_settings;
-                extern bool show_console;
-                extern bool show_properties;
-                
-                ImGui::MenuItem("File Explorer", NULL, &show_file_explorer);
-                ImGui::MenuItem("Example Panel", NULL, &show_example_panel);
-                ImGui::MenuItem("Network Settings", NULL, &show_network_settings);
-                ImGui::MenuItem("Console", NULL, &show_console);
-                ImGui::MenuItem("Properties", NULL, &show_properties);
+                ImGui::MenuItem("File Explorer", NULL, &LocalTether::UI::show_file_explorer);
+                ImGui::MenuItem("Example Panel", NULL, &LocalTether::UI::show_example_panel);
+                ImGui::MenuItem("Network Settings", NULL, &LocalTether::UI::show_network_settings);
+                ImGui::MenuItem("Console", NULL, &LocalTether::UI::show_console);
+                ImGui::MenuItem("Properties", NULL, &LocalTether::UI::show_properties);
                 ImGui::EndMenu();
             }
             

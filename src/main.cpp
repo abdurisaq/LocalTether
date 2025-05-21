@@ -1,12 +1,14 @@
 #include "core/SDLApp.h"
 #include "ui/StyleManager.h"
 #include "ui/DockspaceManager.h"
+#include "ui/UIState.h"
 #include "ui/panels/ConsolePanel.h"
 #include "ui/panels/FileExplorerPanel.h"
 #include "ui/panels/NetworkSettingsPanel.h"
 #include "ui/panels/PropertiesPanel.h"
 #include "utils/Logger.h"
 
+// OpenSSL and other external includes after your UI headers
 #include <boost/asio.hpp>
 #include <openssl/ssl.h>
 
@@ -16,21 +18,15 @@
 #include <polkit/polkit.h>
 #endif
 
-namespace LocalTether{
-namespace UI{
-bool show_example_panel = true;
-bool show_network_settings = true;
-bool show_file_explorer = true;
-bool show_console = true;
-bool show_properties = true;
-}
-}
-using namespace LocalTether;
 
+
+// Don't use "using namespace LocalTether" to avoid ambiguity
+// Create an alias instead for shorter code
+namespace LT = LocalTether;
 
 int main(int argc, char** argv) {
     // Create and initialize the application
-    Core::SDLApp app("LocalTether");
+    LT::Core::SDLApp app("LocalTether");
     if (!app.Initialize()) {
         return -1;
     }
@@ -40,15 +36,15 @@ int main(int argc, char** argv) {
     SSL_library_init();
 
 #ifndef _WIN32
-    Utils::Logger::GetInstance().Info("PolKit ready");
+    LT::Utils::Logger::GetInstance().Info("PolKit ready");
 #endif
 
-    // Create UI panels
-    UI::DockspaceManager dockspaceManager;
-    UI::Panels::ConsolePanel consolePanel;
-    UI::Panels::FileExplorerPanel fileExplorerPanel;
-    UI::Panels::NetworkSettingsPanel networkSettingsPanel;
-    UI::Panels::PropertiesPanel propertiesPanel;
+    // Create UI panels - fully qualify with LT:: prefix
+    LT::UI::DockspaceManager dockspaceManager;
+    LT::UI::Panels::ConsolePanel consolePanel;
+    LT::UI::Panels::FileExplorerPanel fileExplorerPanel;
+    LT::UI::Panels::NetworkSettingsPanel networkSettingsPanel;
+    LT::UI::Panels::PropertiesPanel propertiesPanel;
     
     // Add initial log messages
     consolePanel.AddLogMessage("Application started");
@@ -62,21 +58,21 @@ int main(int argc, char** argv) {
         dockspaceManager.CreateDockspace(&running);
 
         // Show panels
-        if (LocalTether::UI::show_file_explorer)
-            fileExplorerPanel.Show(&LocalTether::UI::show_file_explorer);
+        if (LT::UI::show_file_explorer)
+            fileExplorerPanel.Show(&LT::UI::show_file_explorer);
         
-        if (LocalTether::UI::show_console)
-            consolePanel.Show(&LocalTether::UI::show_console);
+        if (LT::UI::show_console)
+            consolePanel.Show(&LT::UI::show_console);
         
-        if (LocalTether::UI::show_properties)
-            propertiesPanel.Show(&LocalTether::UI::show_properties);
+        if (LT::UI::show_properties)
+            propertiesPanel.Show(&LT::UI::show_properties);
         
-        if (LocalTether::UI::show_network_settings)
-            networkSettingsPanel.Show(&LocalTether::UI::show_network_settings);
+        if (LT::UI::show_network_settings)
+            networkSettingsPanel.Show(&LT::UI::show_network_settings);
 
         // Example panel
-        if (LocalTether::UI::show_example_panel) {
-            ImGui::Begin("Example Panel", &LocalTether::UI::show_example_panel);
+        if (LT::UI::show_example_panel) {
+            ImGui::Begin("Example Panel", &LT::UI::show_example_panel);
             ImGui::Text("Boost.Asio io_context is %s", io_context.stopped() ? "stopped" : "running");
             ImGui::Text("This window can be dragged and docked.");
             

@@ -60,6 +60,7 @@ set(SOURCES
     # UI Components
     src/ui/StyleManager.cpp
     src/ui/DockspaceManager.cpp
+    src/ui/UIState.cpp
     
     # UI Panels
     src/ui/panels/ConsolePanel.cpp
