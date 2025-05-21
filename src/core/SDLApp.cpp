@@ -75,7 +75,11 @@ bool SDLApp::Initialize() {
     io->Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\segoeui.ttf", 18.0f);
     #else
     // Use a system font on Linux
-    io->Fonts->AddFontFromFileTTF("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 18.0f);
+    // if (!io->Fonts->AddFontFromFileTTF("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 18.0f)) {
+    //     std::cerr << "[WARN] Failed to load DejaVuSans.ttf, using default font instead." << std::endl;
+    //     io->Fonts->AddFontDefault();
+    // }
+
     #endif
     
     // Enable docking and viewports

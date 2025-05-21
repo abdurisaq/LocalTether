@@ -1,0 +1,119 @@
+Installing required packages...
+Updating and loading repositories:
+Repositories loaded.
+Package "cmake-3.30.8-1.fc41.x86_64" is already installed.
+
+Nothing to do.
+Updating and loading repositories:
+Repositories loaded.
+Package "git-2.49.0-1.fc41.x86_64" is already installed.
+
+Nothing to do.
+Updating and loading repositories:
+Repositories loaded.
+Package "curl-8.9.1-3.fc41.x86_64" is already installed.
+
+Nothing to do.
+Updating and loading repositories:
+Repositories loaded.
+Package "gcc-14.2.1-7.fc41.x86_64" is already installed.
+
+Nothing to do.
+Updating and loading repositories:
+Repositories loaded.
+Package "gcc-c++-14.2.1-7.fc41.x86_64" is already installed.
+
+Nothing to do.
+Updating and loading repositories:
+Repositories loaded.
+Package "make-1:4.4.1-8.fc41.x86_64" is already installed.
+
+Nothing to do.
+Updating and loading repositories:
+Repositories loaded.
+Package "ninja-build-1.12.1-3.fc41.x86_64" is already installed.
+
+Nothing to do.
+Updating and loading repositories:
+Repositories loaded.
+Package "pkgconf-pkg-config-2.3.0-1.fc41.x86_64" is already installed.
+
+Nothing to do.
+Updating and loading repositories:
+Repositories loaded.
+Package "libtool-2.4.7-12.fc41.x86_64" is already installed.
+
+Nothing to do.
+Updating and loading repositories:
+Repositories loaded.
+Package "autoconf-2.72-4.fc41.noarch" is already installed.
+
+Nothing to do.
+Updating and loading repositories:
+Repositories loaded.
+Package "automake-1.16.5-17.fc41.noarch" is already installed.
+
+Nothing to do.
+Updating Dear ImGui...
+~/LocalTether/external/imgui ~/LocalTether/scripts
+Already on 'docking'
+Your branch is up to date with 'origin/docking'.
+Already up to date.
+~/LocalTether/scripts
+Computing installation plan...
+The following packages are already installed:
+    boost-asio:x64-linux@1.88.0
+The following packages will be built and installed:
+  * dbus[core,systemd]:x64-linux@1.16.2#1
+  * egl-registry:x64-linux@2024-01-25
+    glad[core,loader]:x64-linux@0.1.36
+  * libsystemd:x64-linux@256.4
+  * libxcrypt:x64-linux@4.4.38
+  * lz4:x64-linux@1.10.0
+  * opengl-registry:x64-linux@2024-02-10#1
+    sdl2[core,dbus,ibus,wayland,x11]:x64-linux@2.32.6
+  * vcpkg-tool-meson:x64-linux@1.7.2
+  * zstd:x64-linux@1.5.7
+Additional packages (*) will be modified to complete this operation.
+Detecting compiler hash for triplet x64-linux...
+Compiler found: /usr/bin/g++
+Restored 0 package(s) from /home/duri/.cache/vcpkg/archives in 212 us. Use --debug to see more details.
+boost-asio:x64-linux is already installed
+Installing 1/10 libxcrypt:x64-linux@4.4.38...
+Building libxcrypt:x64-linux@4.4.38...
+-- libxcrypt requires libltdl-dev from the system package manager (example: "sudo apt install libltdl-dev")
+-- Using cached besser82-libxcrypt-v4.4.38.tar.gz
+-- Cleaning sources at /home/duri/LocalTether/vcpkg/buildtrees/libxcrypt/src/v4.4.38-9da89a5066.clean. Use --editable to skip cleaning for the packages you specify.
+-- Extracting source /home/duri/LocalTether/vcpkg/downloads/besser82-libxcrypt-v4.4.38.tar.gz
+-- Using source at /home/duri/LocalTether/vcpkg/buildtrees/libxcrypt/src/v4.4.38-9da89a5066.clean
+-- Found external ninja('1.12.1').
+-- Getting CMake variables for x64-linux
+-- Generating configure for x64-linux
+-- Finished generating configure for x64-linux
+-- Configuring x64-linux-dbg
+CMake Error at scripts/cmake/vcpkg_execute_required_process.cmake:127 (message):
+    Command failed: /usr/bin/bash -c "V=1 CC='/usr/bin/gcc' CXX='/usr/bin/g++' CC_FOR_BUILD='/usr/bin/gcc' CPP_FOR_BUILD='/usr/bin/gcc -E' CXX_FOR_BUILD='/usr/bin/g++' NM='/usr/bin/nm' RC='' WINDRES='' DLLTOOL='CMAKE_DLLTOOL-NOTFOUND' STRIP='/usr/bin/strip' OBJDUMP='/usr/bin/objdump' RANLIB='/usr/bin/ranlib' AR='/usr/bin/ar' LD='/usr/bin/ld' ./../src/v4.4.38-9da89a5066.clean/configure \"lt_cv_deplibs_check_method=pass_all\" \"--prefix=/home/duri/LocalTether/vcpkg/installed/x64-linux/debug\" \"--bindir=\\${prefix}/../tools/libxcrypt/debug/bin\" \"--sbindir=\\${prefix}/../tools/libxcrypt/debug/sbin\" \"--libdir=\\${prefix}/lib\" \"--includedir=\\${prefix}/../include\" \"--mandir=\\${prefix}/share/libxcrypt\" \"--docdir=\\${prefix}/share/libxcrypt\" \"--datarootdir=\\${prefix}/share/libxcrypt\" \"--disable-shared\" \"--enable-static\""
+    Working Directory: /home/duri/LocalTether/vcpkg/buildtrees/libxcrypt/x64-linux-dbg
+    Error code: 1
+    See logs for more information:
+      /home/duri/LocalTether/vcpkg/buildtrees/libxcrypt/config-x64-linux-dbg-config.log
+      /home/duri/LocalTether/vcpkg/buildtrees/libxcrypt/config-x64-linux-dbg-out.log
+      /home/duri/LocalTether/vcpkg/buildtrees/libxcrypt/config-x64-linux-dbg-err.log
+
+Call Stack (most recent call first):
+  installed/x64-linux/share/vcpkg-make/vcpkg_make.cmake:41 (vcpkg_execute_required_process)
+  installed/x64-linux/share/vcpkg-make/vcpkg_make.cmake:268 (vcpkg_run_shell)
+  installed/x64-linux/share/vcpkg-make/vcpkg_make_configure.cmake:108 (vcpkg_make_run_configure)
+  ports/libxcrypt/portfile.cmake:18 (vcpkg_make_configure)
+  scripts/ports.cmake:206 (include)
+
+
+error: building libxcrypt:x64-linux failed with: BUILD_FAILED
+See https://learn.microsoft.com/vcpkg/troubleshoot/build-failures?WT.mc_id=vcpkg_inproduct_cli for more information.
+Elapsed time to handle libxcrypt:x64-linux: 17 s
+Please ensure you're using the latest port files with `git pull` and `vcpkg update`.
+Then check for known issues at:
+  https://github.com/microsoft/vcpkg/issues?q=is%3Aissue+is%3Aopen+in%3Atitle+libxcrypt
+You can submit a new issue at:
+  https://github.com/microsoft/vcpkg/issues/new?title=[libxcrypt]+Build+error+on+x64-linux&body=Copy%20issue%20body%20from%20%2Fhome%2Fduri%2FLocalTether%2Fvcpkg%2Finstalled%2Fvcpkg%2Fissue_body.md
+

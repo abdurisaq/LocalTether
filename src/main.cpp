@@ -16,14 +16,17 @@
 #include <polkit/polkit.h>
 #endif
 
-using namespace LocalTether;
-
-// Global panel flags
+namespace LocalTether{
+namespace UI{
 bool show_example_panel = true;
 bool show_network_settings = true;
 bool show_file_explorer = true;
 bool show_console = true;
 bool show_properties = true;
+}
+}
+using namespace LocalTether;
+
 
 int main(int argc, char** argv) {
     // Create and initialize the application
@@ -55,24 +58,25 @@ int main(int argc, char** argv) {
     // Set up the render callback
     app.SetRenderCallback([&]() {
         // Create the dockspace
-        dockspaceManager.CreateDockspace(&app.IsRunning());
+        bool running = app.IsRunning();
+        dockspaceManager.CreateDockspace(&running);
 
         // Show panels
-        if (show_file_explorer)
-            fileExplorerPanel.Show(&show_file_explorer);
+        if (LocalTether::UI::show_file_explorer)
+            fileExplorerPanel.Show(&LocalTether::UI::show_file_explorer);
         
-        if (show_console)
-            consolePanel.Show(&show_console);
+        if (LocalTether::UI::show_console)
+            consolePanel.Show(&LocalTether::UI::show_console);
         
-        if (show_properties)
-            propertiesPanel.Show(&show_properties);
+        if (LocalTether::UI::show_properties)
+            propertiesPanel.Show(&LocalTether::UI::show_properties);
         
-        if (show_network_settings)
-            networkSettingsPanel.Show(&show_network_settings);
+        if (LocalTether::UI::show_network_settings)
+            networkSettingsPanel.Show(&LocalTether::UI::show_network_settings);
 
         // Example panel
-        if (show_example_panel) {
-            ImGui::Begin("Example Panel", &show_example_panel);
+        if (LocalTether::UI::show_example_panel) {
+            ImGui::Begin("Example Panel", &LocalTether::UI::show_example_panel);
             ImGui::Text("Boost.Asio io_context is %s", io_context.stopped() ? "stopped" : "running");
             ImGui::Text("This window can be dragged and docked.");
             

@@ -1,6 +1,6 @@
 #pragma once
 #include "imgui_include.h"
-
+#include <string>
 namespace LocalTether::UI::Panels {
     class PropertiesPanel {
     public:

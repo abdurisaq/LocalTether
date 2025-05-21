@@ -1,3 +1,4 @@
+#include <string>
 #include "ui/panels/PropertiesPanel.h"
 
 namespace LocalTether::UI::Panels {

@@ -1,4 +1,3 @@
-Tether/src/ui/StyleManager.cpp
 #include "ui/StyleManager.h"
 
 namespace LocalTether::UI {

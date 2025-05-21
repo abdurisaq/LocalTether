@@ -38,7 +38,7 @@ endif()
 
 # ImGui directories
 set(IMGUI_DIR "${CMAKE_SOURCE_DIR}/external/imgui")
-set(IMGUI_BACKEND_DIR "${CMAKE_SOURCE_DIR}/external/imgui_backends")
+set(IMGUI_BACKEND_DIR "${CMAKE_SOURCE_DIR}/external/imgui/backends")
 
 # ImGui sources
 set(IMGUI_SOURCES
