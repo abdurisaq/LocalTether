@@ -41,19 +41,13 @@ install_package() {
 # Install essential packages
 install_packages() {
     echo "Installing required packages..."
-    install_package cmake
-    install_package git
-    install_package curl
-    install_package gcc
-    install_package gcc-c++
-    install_package make
-    install_package perl
-    install_package ninja-build
-    install_package pkg-config
+    install_package cmake git curl gcc gcc-c++ make ninja-build 
+    install_package perl pkg-config
     install_package libtool libtool-ltdl-devel
-    install_package autoconf
-    install_package automake
-    install_package polkit-devel
+    install_package autoconf automake polkit-devel
+    install_package wayland-devel wayland-protocols-devel libxkbcommon-devel
+    install_package mesa-libGL-devel mesa-libEGL-devel libX11-devel libXext-devel
+    install_package SDL2-devel SDL2
 }
 
 install_packages
@@ -87,7 +81,7 @@ else
     popd
 fi
 # Install libraries with static linking flags
-"$VCPKG_DIR/vcpkg" install boost-asio sdl2[core] openssl glad --triplet x64-linux
+"$VCPKG_DIR/vcpkg" install boost-asio  openssl glad #--triplet x64-linux
 
 # Create build directory and configure CMake
 mkdir -p "$BUILD_DIR"

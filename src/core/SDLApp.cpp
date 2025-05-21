@@ -3,6 +3,7 @@
 #include "utils/Logger.h"
 #include <iostream>
 
+
 namespace LocalTether::Core {
 
 // Initialize static instance
@@ -19,15 +20,36 @@ SDLApp::~SDLApp() {
 }
 
 bool SDLApp::Initialize() {
-    // --- SDL2 initialization ---
+    std::cout << "Available SDL video drivers:" << std::endl;
+    for (int i = 0; i < SDL_GetNumVideoDrivers(); i++) {
+        std::cout << " - " << SDL_GetVideoDriver(i) << std::endl;
+    }
+
+    // Check your display environment
+    std::cout << "Environment:" << std::endl;
+    std::cout << "  XDG_SESSION_TYPE: " << (getenv("XDG_SESSION_TYPE") ? getenv("XDG_SESSION_TYPE") : "not set") << std::endl;
+    std::cout << "  WAYLAND_DISPLAY: " << (getenv("WAYLAND_DISPLAY") ? getenv("WAYLAND_DISPLAY") : "not set") << std::endl;
+    std::cout << "  DISPLAY: " << (getenv("DISPLAY") ? getenv("DISPLAY") : "not set") << std::endl;
+
+    // Initialize SDL - let it choose the best driver automatically
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
-        SDL_Log("SDL_Init Error: %s", SDL_GetError());
+        std::cerr << "SDL_Init Error: " << SDL_GetError() << std::endl;
         return false;
     }
 
+    // Print which driver SDL chose
+    std::cout << "Using video driver: " << SDL_GetCurrentVideoDriver() << std::endl;
+
+    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
+        std::cerr << "SDL_Init Error: " << SDL_GetError() << std::endl;
+        return false;
+    }
+
+    // Print the driver being used
+    std::cout << "Using video driver: " << SDL_GetCurrentVideoDriver() << std::endl;
     // Request OpenGL 3.2 Core context
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
@@ -35,19 +57,23 @@ bool SDLApp::Initialize() {
 
     // Create window with maximized flag for desktop-like appearance
     window = SDL_CreateWindow(title.c_str(),
-        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        width, height,
-        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_MAXIMIZED);
+                              SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+                              width, height,
+                              SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_MAXIMIZED);
 
     if (!window) {
         SDL_Log("SDL_CreateWindow Error: %s", SDL_GetError());
+        std::cout<<"sdl create window error"<< SDL_GetError()<<std::endl;
         SDL_Quit();
         return false;
     }
+    SDL_ShowWindow(window);
 
     gl_context = SDL_GL_CreateContext(window);
     if (!gl_context) {
         SDL_Log("SDL_GL_CreateContext Error: %s", SDL_GetError());
+
+        std::cout<<"SDL_GL Crete context error"<< SDL_GetError()<<std::endl;
         SDL_DestroyWindow(window);
         SDL_Quit();
         return false;
@@ -59,6 +85,7 @@ bool SDLApp::Initialize() {
     // --- glad initialization ---
     if (!gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress)) {
         SDL_Log("Failed to initialize GLAD");
+        std::cout<<"FAiled to initialize glad"<<std::endl;
         SDL_GL_DeleteContext(gl_context);
         SDL_DestroyWindow(window);
         SDL_Quit();
@@ -74,11 +101,7 @@ bool SDLApp::Initialize() {
     #ifdef _WIN32
     io->Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\segoeui.ttf", 18.0f);
     #else
-    // Use a system font on Linux
-    // if (!io->Fonts->AddFontFromFileTTF("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 18.0f)) {
-    //     std::cerr << "[WARN] Failed to load DejaVuSans.ttf, using default font instead." << std::endl;
-    //     io->Fonts->AddFontDefault();
-    // }
+        io->Fonts->AddFontDefault();
 
     #endif
     

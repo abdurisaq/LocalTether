@@ -7,6 +7,7 @@
 #include "ui/panels/NetworkSettingsPanel.h"
 #include "ui/panels/PropertiesPanel.h"
 #include "utils/Logger.h"
+#include <iostream>
 
 // OpenSSL and other external includes after your UI headers
 #include <boost/asio.hpp>
@@ -25,7 +26,6 @@
 namespace LT = LocalTether;
 
 int main(int argc, char** argv) {
-    // Create and initialize the application
     LT::Core::SDLApp app("LocalTether");
     if (!app.Initialize()) {
         return -1;
