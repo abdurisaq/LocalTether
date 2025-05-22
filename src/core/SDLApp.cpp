@@ -6,7 +6,6 @@
 
 namespace LocalTether::Core {
 
-// Initialize static instance
 SDLApp* SDLApp::instance = nullptr;
 
 SDLApp::SDLApp(const std::string& title, int width, int height)
@@ -25,20 +24,17 @@ bool SDLApp::Initialize() {
         std::cout << " - " << SDL_GetVideoDriver(i) << std::endl;
     }
 
-    // Check your display environment
     std::cout << "Environment:" << std::endl;
     std::cout << "  XDG_SESSION_TYPE: " << (getenv("XDG_SESSION_TYPE") ? getenv("XDG_SESSION_TYPE") : "not set") << std::endl;
     std::cout << "  WAYLAND_DISPLAY: " << (getenv("WAYLAND_DISPLAY") ? getenv("WAYLAND_DISPLAY") : "not set") << std::endl;
     std::cout << "  DISPLAY: " << (getenv("DISPLAY") ? getenv("DISPLAY") : "not set") << std::endl;
 
     
-    // Initialize SDL - let it choose the best driver automatically
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
         std::cerr << "SDL_Init Error: " << SDL_GetError() << std::endl;
         return false;
     }
 
-    // Print which driver SDL chose
     std::cout << "Using video driver: " << SDL_GetCurrentVideoDriver() << std::endl;
 
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
@@ -46,11 +42,10 @@ bool SDLApp::Initialize() {
         return false;
     }
 
-    // Print the driver being used
     std::cout << "Using video driver: " << SDL_GetCurrentVideoDriver() << std::endl;
     // Request OpenGL 3.2 Core context
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);

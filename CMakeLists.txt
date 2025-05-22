@@ -51,26 +51,18 @@ set(IMGUI_SOURCES
     ${IMGUI_BACKEND_DIR}/imgui_impl_opengl3.cpp
 )
 
+file(GLOB_RECURSE CORE_SOURCES "src/core/*.cpp")
+file(GLOB_RECURSE UI_SOURCES "src/ui/*.cpp")
+file(GLOB_RECURSE UI_PANEL_SOURCES "src/ui/panels/*.cpp")
+file(GLOB_RECURSE UTILS_SOURCES "src/utils/*.cpp")
+
+# Combine all sources
 set(SOURCES
     src/main.cpp
-    
-    # Core
-    src/core/SDLApp.cpp
-    
-    # UI Components
-    src/ui/StyleManager.cpp
-    src/ui/DockspaceManager.cpp
-    src/ui/UIState.cpp
-    
-    # UI Panels
-    src/ui/panels/ConsolePanel.cpp
-    src/ui/panels/FileExplorerPanel.cpp
-    src/ui/panels/NetworkSettingsPanel.cpp
-    src/ui/panels/PropertiesPanel.cpp
-    
-    # Utilities
-    src/utils/Logger.cpp
-    src/utils/Config.cpp
+    ${CORE_SOURCES}
+    ${UI_SOURCES}
+    ${UI_PANEL_SOURCES}
+    ${UTILS_SOURCES}
 )
 
 # Create executable
