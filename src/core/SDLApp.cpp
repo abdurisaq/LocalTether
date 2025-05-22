@@ -37,10 +37,6 @@ bool SDLApp::Initialize() {
 
     std::cout << "Using video driver: " << SDL_GetCurrentVideoDriver() << std::endl;
 
-    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
-        std::cerr << "SDL_Init Error: " << SDL_GetError() << std::endl;
-        return false;
-    }
 
     std::cout << "Using video driver: " << SDL_GetCurrentVideoDriver() << std::endl;
     // Request OpenGL 3.2 Core context
@@ -97,8 +93,7 @@ bool SDLApp::Initialize() {
     #ifdef _WIN32
     io->Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\segoeui.ttf", 18.0f);
     #else
-        io->Fonts->AddFontDefault();
-
+        io->Fonts->AddFontFromFileTTF("/usr/share/fonts/open-sans/OpenSans-Regular.ttf", 18.0f); //for now hardcoded, add to build system later donwloading font
     #endif
     
     // Enable docking and viewports
