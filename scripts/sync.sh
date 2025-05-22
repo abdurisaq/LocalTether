@@ -1,15 +1,11 @@
 #!/usr/bin/env bash
 
-# =======================
-# Configuration defaults
-# =======================
 DEPTH=0
 CUSTOM_WINDOWS_NAME=""
 CUSTOM_WINDOWS_USER=""
 
-# =======================
-# Parse arguments
-# =======================
+EXCLUDE_DIRS=("vcpkg" "build" ".git" "external")
+
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --depth)
@@ -32,27 +28,19 @@ while [[ "$#" -gt 0 ]]; do
     shift
 done
 
-# =======================
-# Path setup
-# =======================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Move up DEPTH + 1 levels
 PROJECT_DIR="$SCRIPT_DIR"
 for ((i=0; i<=DEPTH; i++)); do
     PROJECT_DIR="$(dirname "$PROJECT_DIR")"
 done
 
-# Determine project name
 if [[ -n "$CUSTOM_WINDOWS_NAME" ]]; then
     PROJECT_NAME="$CUSTOM_WINDOWS_NAME"
 else
     PROJECT_NAME="$(basename "$PROJECT_DIR")"
 fi
 
-# =======================
-# Determine Windows user
-# =======================
 if [[ -n "$CUSTOM_WINDOWS_USER" ]]; then
     WINDOWS_USER="$CUSTOM_WINDOWS_USER"
 else
@@ -125,17 +113,26 @@ process_event() {
     esac
 }
 
-# Initial sync
-rsync -a "$WATCHED_DIR/" "$WINDOWS_DIR/"
+RSYNC_CMD=(rsync -a)
+for exclude in "${EXCLUDE_DIRS[@]}"; do
+    RSYNC_CMD+=(--exclude "/$exclude")
+done
+RSYNC_CMD+=("$WATCHED_DIR/" "$WINDOWS_DIR/")
+"${RSYNC_CMD[@]}"
 
-# =======================
-# Watcher loop
-# =======================
+
+
 inotifywait -m -r -e modify,create,delete,move,moved_to,moved_from "$WATCHED_DIR" |
     while read -r path action file; do
         echo "$(date): $action on $path$file" >> "$LOG_FILE"
         FULLPATH="${path}${file}"
         RELEVANTPATH=${FULLPATH:${WATCHED_DIR_LENGTH}}
+        for exclude in "${EXCLUDE_DIRS[@]}"; do
+            if [[ "$RELEVANTPATH" == */"$exclude"* ]]; then
+                echo "Skipping excluded path: $RELEVANTPATH" >> "$LOG_FILE"
+                continue 2 
+            fi
+        done
         echo "$RELEVANTPATH"
         process_event "$action" "$RELEVANTPATH"
     done

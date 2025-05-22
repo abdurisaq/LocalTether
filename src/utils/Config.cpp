@@ -1,4 +1,3 @@
-// filepath: /home/duri/LocalTether/src/utils/Config.cpp
 #include "utils/Config.h"
 #include <fstream>
 #include <iostream>

@@ -20,7 +20,7 @@ endif()
 
 # Find common packages
 find_package(SDL2 CONFIG REQUIRED)
-find_package(Boost REQUIRED COMPONENTS system)
+find_package(asio CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(glad CONFIG REQUIRED)
 
@@ -79,7 +79,7 @@ target_include_directories(LocalTether PRIVATE
 target_link_libraries(LocalTether PRIVATE
     SDL2::SDL2
     SDL2::SDL2main
-    Boost::system
+    asio::asio
     OpenSSL::SSL
     OpenSSL::Crypto
     glad::glad

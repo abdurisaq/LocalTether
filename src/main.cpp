@@ -1,5 +1,4 @@
 #include "core/SDLApp.h"
-#include "ui/StyleManager.h"
 #include "ui/DockspaceManager.h"
 #include "ui/UIState.h"
 #include "ui/FlowPanels.h"  
@@ -8,9 +7,8 @@
 #include "ui/panels/NetworkSettingsPanel.h"
 #include "ui/panels/PropertiesPanel.h"
 #include "utils/Logger.h"
-#include <iostream>
 
-#include <boost/asio.hpp>
+#include <asio.hpp>
 #include <openssl/ssl.h>
 
 #ifdef _WIN32
@@ -28,7 +26,7 @@ int main(int argc, char** argv) {
     }
     
     // Initialize libraries
-    boost::asio::io_context io_context;
+    asio::io_context io_context;
     SSL_library_init();
 
 #ifndef _WIN32
@@ -46,6 +44,7 @@ int main(int argc, char** argv) {
     consolePanel.AddLogMessage("Application started");
     consolePanel.AddLogMessage("Initialized ImGui with docking support");
     consolePanel.AddLogMessage("Default layout created");
+    
 
     LT::UI::app_mode = LT::UI::AppMode::None;
     app.SetRenderCallback([&]() {
@@ -54,8 +53,13 @@ int main(int argc, char** argv) {
         dockspaceManager.CreateDockspace(&running);
 
         switch (LT::UI::app_mode) {
+
             case LT::UI::AppMode::None:
                 LT::UI::Flow::ShowHomePanel();
+                break;
+            
+            case LT::UI::AppMode::Connecting:
+                
                 break;
             case LT::UI::AppMode::HostSetup:
                 LT::UI::Flow::ShowHostSetupPanel();

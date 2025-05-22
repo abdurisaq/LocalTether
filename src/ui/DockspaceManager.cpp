@@ -144,24 +144,27 @@ namespace LocalTether::UI {
             ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
             ImGui::DockBuilderSetNodeSize(dockspace_id, ImGui::GetMainViewport()->Size);
 
-            // Split the dockspace into regions
+            
             ImGuiID dock_main_id = dockspace_id;
             
-            // Create a left panel (20% width)
+            
             ImGuiID dock_left_id = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Left, 0.2f, nullptr, &dock_main_id);
             
-            // Create a right panel (25% width)
+           
             ImGuiID dock_right_id = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Right, 0.25f, nullptr, &dock_main_id);
             
-            // Create a bottom panel (25% height) from the remaining main area
+            
             ImGuiID dock_bottom_id = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Down, 0.25f, nullptr, &dock_main_id);
 
-            // Dock windows to specific regions
+            
             ImGui::DockBuilderDockWindow("File Explorer", dock_left_id);
             ImGui::DockBuilderDockWindow("Network Settings", dock_left_id);
             ImGui::DockBuilderDockWindow("Example Panel", dock_main_id);
             ImGui::DockBuilderDockWindow("Console", dock_bottom_id);
             ImGui::DockBuilderDockWindow("Properties", dock_right_id);
+            ImGui::DockBuilderDockWindow("Welcome", dock_main_id);
+            ImGui::DockBuilderDockWindow("Host Setup", dock_main_id);
+            ImGui::DockBuilderDockWindow("Join Setup", dock_main_id);
             
             // Finalize the layout
             ImGui::DockBuilderFinish(dockspace_id);

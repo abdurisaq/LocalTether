@@ -12,7 +12,7 @@ EXTERNAL_DIR="$ROOT_DIR/external"
 IMGUI_DIR="$EXTERNAL_DIR/imgui"
 IMGUI_BACKENDS_DIR="$EXTERNAL_DIR/imgui_backends"
 
-# Detect the package manager
+
 detect_package_manager() {
     if command -v apt-get &>/dev/null; then
         echo "apt"
@@ -25,32 +25,43 @@ detect_package_manager() {
     fi
 }
 
-# Install packages based on detected package manager
-install_package() {
-    local pkg=$1
-    local manager
-    manager=$(detect_package_manager)
-    case $manager in
-        apt) sudo apt update && sudo apt install -y "$pkg" ;;
-        pacman) sudo pacman -Sy --noconfirm "$pkg" ;;
-        dnf) sudo dnf install -y "$pkg" ;;
-        *) echo "Unsupported package manager. Install '$pkg' manually." >&2; exit 1 ;;
+install_build_essentials() {
+    case $(detect_package_manager) in
+        apt)
+            sudo apt update
+            sudo apt install -y build-essential cmake git curl ninja-build pkg-config libtool autoconf automake
+            ;;
+        pacman)
+            sudo pacman -Sy --noconfirm base-devel cmake git curl ninja pkgconf libtool autoconf automake
+            ;;
+        dnf)
+            sudo dnf install -y gcc gcc-c++ make cmake git curl ninja-build pkgconf libtool autoconf automake
+            ;;
+        *)
+            echo "Unsupported package manager" >&2
+            exit 1
+            ;;
     esac
 }
 
-# Install essential packages
-install_packages() {
-    echo "Installing required packages..."
-    install_package cmake git curl gcc gcc-c++ make ninja-build 
-    install_package perl pkg-config
-    install_package libtool libtool-ltdl-devel
-    install_package autoconf automake polkit-devel
-    install_package wayland-devel wayland-protocols-devel libxkbcommon-devel
-    install_package mesa-libGL-devel mesa-libEGL-devel libX11-devel libXext-devel
-    install_package SDL2-devel SDL2
+
+install_gui_deps() {
+    case $(detect_package_manager) in
+        apt)
+            sudo apt update
+            sudo apt install -y libsdl2-dev libx11-dev libxext-dev libegl1-mesa-dev libgl1-mesa-dev libxkbcommon-dev libwayland-dev wayland-protocols libpolkit-gobject-1-dev
+            ;;
+        pacman)
+            sudo pacman -Sy --noconfirm sdl2 libx11 libxext mesa libxkbcommon wayland wayland-protocols polkit
+            ;;
+        dnf)
+            sudo dnf install -y SDL2-devel libX11-devel libXext-devel mesa-libEGL-devel mesa-libGL-devel libxkbcommon-devel wayland-devel wayland-protocols-devel polkit-devel
+            ;;
+    esac
 }
 
-install_packages
+install_build_essentials
+install_gui_deps
 
 # Clone vcpkg if it doesn't exist
 if [[ ! -d "$VCPKG_DIR" ]]; then
@@ -81,7 +92,7 @@ else
     popd
 fi
 # Install libraries with static linking flags
-"$VCPKG_DIR/vcpkg" install boost-asio  openssl glad #--triplet x64-linux
+"$VCPKG_DIR/vcpkg" install asio  openssl glad --triplet x64-linux
 
 # Create build directory and configure CMake
 mkdir -p "$BUILD_DIR"
@@ -91,6 +102,7 @@ cmake "$ROOT_DIR" \
   -DCMAKE_TOOLCHAIN_FILE="$VCPKG_DIR/scripts/buildsystems/vcpkg.cmake" \
   -DVCPKG_TARGET_TRIPLET="x64-linux" \
   -DVCPKG_LIBRARY_LINKAGE=static \
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
   -DCMAKE_BUILD_TYPE=Release
 
 # Build the project
@@ -98,15 +110,15 @@ cmake --build . --config Release
 popd
 
 # Run the built executable
-EXE_PATH="$BUILD_DIR/LocalTether"
-if [[ -f "$EXE_PATH" ]]; then
-    echo "Running LocalTether..."
-    chmod +x "$EXE_PATH"
-    "$EXE_PATH"
-else
-    echo "Executable not found at $EXE_PATH"
-    exit 1
-fi
+# EXE_PATH="$BUILD_DIR/LocalTether"
+# if [[ -f "$EXE_PATH" ]]; then
+#     echo "Running LocalTether..."
+#     chmod +x "$EXE_PATH"
+#     "$EXE_PATH"
+# else
+#     echo "Executable not found at $EXE_PATH"
+#     exit 1
+# fi
 
 echo "--- Done ---"
 
