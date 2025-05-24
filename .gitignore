@@ -2,3 +2,5 @@ vcpkg/
 external/
 build/
 .cache/
+application.log
+ipAddress.txt
