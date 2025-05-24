@@ -12,10 +12,19 @@
 #include <filesystem>
 #include <fstream>      
 #include <chrono>     
+#include <fcntl.h>      // For O_RDONLY, O_RDWR
+#include <sys/mman.h>   // For mmap, shm_open
+#include <sys/stat.h>   // For mode constants
 
 #ifndef PATH_MAX
 #include <limits.h>
 #endif
+
+struct HelperSharedData {
+    pid_t helper_pid;
+    char socket_path[256];
+    bool ready;
+};
 
 
 namespace LT = LocalTether;
@@ -38,40 +47,84 @@ LinuxInput::LinuxInput() : ipc_socket_(ipc_io_context_) {
 
 LinuxInput::~LinuxInput() {
     stop();
+    close_and_unmap_shared_memory(); 
 }
 
-bool LinuxInput::readHelperPidFile() {
-    std::ifstream pid_file(helper_pid_file_path_);
-    if (pid_file.is_open()) {
-        pid_t pid_from_file = -1;
-        pid_file >> pid_from_file;
-        pid_file.close();
-        if (pid_from_file > 0) {
-            
-            if (kill(pid_from_file, 0) == 0) { 
-                helper_pid_ = pid_from_file;
-                LT::Utils::Logger::GetInstance().Info("LinuxInput: Read helper PID " + std::to_string(helper_pid_) + " from file.");
-                return true;
-            } else {
-                LT::Utils::Logger::GetInstance().Warning("LinuxInput: PID " + std::to_string(pid_from_file) + " from PID file does not exist or no permission. Removing stale PID file.");
-                std::filesystem::remove(helper_pid_file_path_);
-            }
-        } else {
-             LT::Utils::Logger::GetInstance().Warning("LinuxInput: Invalid PID read from PID file: " + std::to_string(pid_from_file));
-        }
-    } else {
-        LT::Utils::Logger::GetInstance().Debug("LinuxInput: PID file not found: " + helper_pid_file_path_);
+bool LinuxInput::open_and_map_shared_memory() {
+    if (shared_data_ptr_ != nullptr && shared_data_ptr_ != MAP_FAILED) {
+        LT::Utils::Logger::GetInstance().Debug("LinuxInput: Shared memory already mapped.");
+        return true;
     }
-    helper_pid_ = -1;
+
+    shm_fd_ = shm_open(shm_name_, O_RDWR, 0666); 
+    if (shm_fd_ == -1) {
+        LT::Utils::Logger::GetInstance().Debug("LinuxInput: shm_open failed (may not exist yet): " + std::string(strerror(errno)));
+        return false;
+    }
+
+    shared_data_ptr_ = (HelperSharedData*)mmap(NULL, sizeof(HelperSharedData), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd_, 0);
+    if (shared_data_ptr_ == MAP_FAILED) {
+        LT::Utils::Logger::GetInstance().Error("LinuxInput: mmap failed: " + std::string(strerror(errno)));
+        close(shm_fd_);
+        shm_fd_ = -1;
+        shared_data_ptr_ = nullptr;
+        return false;
+    }
+    LT::Utils::Logger::GetInstance().Debug("LinuxInput: Shared memory segment " + std::string(shm_name_) + " opened and mapped.");
+    return true;
+}
+
+void LinuxInput::close_and_unmap_shared_memory() {
+    if (shared_data_ptr_ != nullptr && shared_data_ptr_ != MAP_FAILED) {
+        munmap(shared_data_ptr_, sizeof(HelperSharedData));
+        shared_data_ptr_ = nullptr;
+    }
+    if (shm_fd_ != -1) {
+        close(shm_fd_);
+        shm_fd_ = -1;
+    }
+    LT::Utils::Logger::GetInstance().Debug("LinuxInput: Shared memory unmapped and closed.");
+}
+
+bool LinuxInput::read_info_from_shared_memory(pid_t& out_pid, std::string& out_socket_path) {
+    if (!shared_data_ptr_ || shared_data_ptr_ == MAP_FAILED) {
+        LT::Utils::Logger::GetInstance().Warning("LinuxInput: Attempted to read from unmapped shared memory.");
+        return false;
+    }
+
+    if (shared_data_ptr_->ready) {
+        out_pid = shared_data_ptr_->helper_pid;
+        out_socket_path = shared_data_ptr_->socket_path;
+        if (out_pid > 0 && !out_socket_path.empty()) {
+            LT::Utils::Logger::GetInstance().Info("LinuxInput: Read helper PID " + std::to_string(out_pid) + " and socket path '" + out_socket_path + "' from shared memory.");
+            return true;
+        }
+    }
     return false;
 }
 
 
 bool LinuxInput::launchHelperProcess() {
     
-    if (readHelperPidFile() && helper_pid_ != -1) {
-        LT::Utils::Logger::GetInstance().Info("LinuxInput: Helper process (PID " + std::to_string(helper_pid_) + ") might already be running. Attempting to connect.");
-        return true; 
+    if (open_and_map_shared_memory()) {
+        if (read_info_from_shared_memory(helper_actual_pid_, actual_helper_socket_path_)) {
+            if (helper_actual_pid_ > 0 && kill(helper_actual_pid_, 0) == 0) {
+                 LT::Utils::Logger::GetInstance().Info("LinuxInput: Helper process (PID " + std::to_string(helper_actual_pid_) + ") detected via shared memory. Attempting to connect.");
+                
+                 return true; 
+            } else {
+                LT::Utils::Logger::GetInstance().Warning("LinuxInput: Stale PID " + std::to_string(helper_actual_pid_) + " in shared memory. Will attempt to launch new helper.");
+                close_and_unmap_shared_memory(); 
+                shm_unlink(shm_name_); 
+            }
+        } else {
+            
+            close_and_unmap_shared_memory();
+            shm_unlink(shm_name_);
+        }
+    } else {
+         
+         shm_unlink(shm_name_);
     }
 
 
@@ -80,57 +133,79 @@ bool LinuxInput::launchHelperProcess() {
         LT::Utils::Logger::GetInstance().Error("LinuxInput: Cannot launch input helper: executable path unknown.");
         return false;
     }
-
-    std::filesystem::remove(helper_socket_path_);
     
+    // Clean up any old socket file that might exist at a predictable path if we are about to launch.
+    // This is less critical now as the path is dynamic and communicated via SHM.
+    // std::filesystem::remove(actual_helper_socket_path_); // actual_helper_socket_path_ is not known yet
 
-    //attempting
     std::string command_str_log = "pkexec " + exePath + " --input-helper-mode";
     LT::Utils::Logger::GetInstance().Info("LinuxInput: Attempting to launch helper: " + command_str_log);
 
-    pid_t pid = fork();
-    if (pid == 0) { 
-        // Set PDEATHSIG to SIGHUP so this child (which runs pkexec) exits if the main app (parent) dies.
+    pkexec_pid_ = fork();
+    if (pkexec_pid_ == 0) { 
         prctl(PR_SET_PDEATHSIG, SIGHUP);
-
-        //dont want it to output to terminal so send to null
         int dev_null_fd = open("/dev/null", O_WRONLY);
         if (dev_null_fd != -1) {
             dup2(dev_null_fd, STDOUT_FILENO);
             dup2(dev_null_fd, STDERR_FILENO);
             close(dev_null_fd);
         }
-        execlp("pkexec", "pkexec", /*"--disable-internal-agent",*/ exePath.c_str(), "--input-helper-mode", (char*)nullptr);
-        perror("LinuxInput: execlp pkexec failed"); // This might go to /dev/null
+        execlp("pkexec", "pkexec", exePath.c_str(), "--input-helper-mode", (char*)nullptr);
+        perror("LinuxInput: execlp pkexec failed"); 
         _exit(127); 
-    } else if (pid < 0) {
+    } else if (pkexec_pid_ < 0) {
         LT::Utils::Logger::GetInstance().Error("LinuxInput: Failed to fork for pkexec. Error: " + std::string(strerror(errno)));
         return false;
     }
 
-    LT::Utils::Logger::GetInstance().Info("LinuxInput: pkexec process forked (PID: " + std::to_string(pid) + "). Waiting for helper to start and write PID file.");
-  
-    return true; // successfully launched
+    LT::Utils::Logger::GetInstance().Info("LinuxInput: pkexec process forked (PID: " + std::to_string(pkexec_pid_) + "). Waiting for helper to signal readiness via shared memory.");
+    
+    // Detached thread to reap the pkexec child process
+    std::thread([pid = pkexec_pid_]() {
+        int status;
+        waitpid(pid, &status, 0);
+        // Optionally log status
+    }).detach();
+
+    return true; 
 }
 
 bool LinuxInput::connectToHelper() {
-    LT::Utils::Logger::GetInstance().Info("LinuxInput: Attempting to connect to input helper via " + helper_socket_path_);
-    int connect_retries = 10; 
-    bool pid_file_found_this_attempt = false;
+    LT::Utils::Logger::GetInstance().Info("LinuxInput: Attempting to connect to input helper.");
+    int connect_retries = 20; // Increased retries for SHM readiness
+    bool shm_info_read = false;
 
     while (connect_retries-- > 0) {
-        if (!pid_file_found_this_attempt) { // Only try to read PID file once per connection attempt sequence
-            if (readHelperPidFile() && helper_pid_ != -1) {
-                pid_file_found_this_attempt = true; 
-            } else if (connect_retries < 5) { 
-                 LT::Utils::Logger::GetInstance().Warning("LinuxInput: Helper PID file not found yet. Retrying connection...");
+        if (!shm_info_read) {
+            if (!open_and_map_shared_memory()) {
+                 LT::Utils::Logger::GetInstance().Debug("LinuxInput: SHM not available yet. Retrying... (attempts left: " + std::to_string(connect_retries) + ")");
+                 std::this_thread::sleep_for(std::chrono::milliseconds(250));
+                 continue;
+            }
+            if (read_info_from_shared_memory(helper_actual_pid_, actual_helper_socket_path_)) {
+                shm_info_read = true;
+                // Keep SHM mapped for now
+            } else {
+                LT::Utils::Logger::GetInstance().Debug("LinuxInput: Helper info not ready in SHM. Retrying... (attempts left: " + std::to_string(connect_retries) + ")");
+                // Don't unmap yet, helper might still be writing.
+                 std::this_thread::sleep_for(std::chrono::milliseconds(250));
+                continue;
             }
         }
 
+        if (!shm_info_read || actual_helper_socket_path_.empty()) {
+            LT::Utils::Logger::GetInstance().Warning("LinuxInput: Helper socket path not available from SHM. Retrying... (attempts left: " + std::to_string(connect_retries) + ")");
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+            shm_info_read = false; // Force re-read of SHM
+            continue;
+        }
+        
+        LT::Utils::Logger::GetInstance().Info("LinuxInput: Attempting to connect to socket: " + actual_helper_socket_path_);
+
         try {
-            ipc_socket_.connect(asio::local::stream_protocol::endpoint(helper_socket_path_));
+            ipc_socket_.connect(asio::local::stream_protocol::endpoint(actual_helper_socket_path_));
             helper_connected_ = true;
-            LT::Utils::Logger::GetInstance().Info("LinuxInput: Connected to input helper (PID: " + (helper_pid_ != -1 ? std::to_string(helper_pid_) : "unknown") + ").");
+            LT::Utils::Logger::GetInstance().Info("LinuxInput: Connected to input helper (PID: " + std::to_string(helper_actual_pid_) + " via socket " + actual_helper_socket_path_ + ").");
 
             ipc_io_context_.reset(); 
             ipc_thread_ = std::thread([this]() {
@@ -139,7 +214,7 @@ bool LinuxInput::connectToHelper() {
                     ipc_io_context_.run();
                 } catch (const std::exception& e) {
                     LT::Utils::Logger::GetInstance().Error("LinuxInput: IPC io_context error: " + std::string(e.what()));
-                    helper_connected_ = false; // Mark as disconnected
+                    helper_connected_ = false; 
                 }
                 LT::Utils::Logger::GetInstance().Info("LinuxInput: IPC thread finished.");
             });
@@ -149,12 +224,13 @@ bool LinuxInput::connectToHelper() {
             if (connect_retries == 0) {
                  LT::Utils::Logger::GetInstance().Error(std::string("LinuxInput: Failed to connect to helper on final attempt: ") + e.what());
             } else {
-                 LT::Utils::Logger::GetInstance().Debug("LinuxInput: Failed to connect to helper (attempt " + std::to_string(10 - connect_retries) + "): " + e.what() + ". Retrying in 1s...");
+                 LT::Utils::Logger::GetInstance().Debug("LinuxInput: Failed to connect to helper socket (attempt " + std::to_string(20 - connect_retries) + "): " + e.what() + ". Retrying in 1s...");
             }
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
     }
-    LT::Utils::Logger::GetInstance().Error("LinuxInput: Failed to connect to input helper after multiple retries.");
+    LT::Utils::Logger::GetInstance().Error("LinuxInput: Failed to connect to input helper after multiple retries (SHM or socket).");
+    close_and_unmap_shared_memory(); // Clean up SHM if connection failed
     return false;
 }
 
@@ -164,56 +240,71 @@ bool LinuxInput::start() {
         return true;
     }
     LT::Utils::Logger::GetInstance().Info("LinuxInput: Starting...");
+    running_ = true;
 
     if (!launchHelperProcess()) {
-        LT::Utils::Logger::GetInstance().Error("LinuxInput: Failed to initiate helper process launch.");
+        LT::Utils::Logger::GetInstance().Error("LinuxInput: Failed to launch helper process.");
+        running_ = false;
         return false;
     }
 
     if (!connectToHelper()) {
-        LT::Utils::Logger::GetInstance().Error("LinuxInput: Failed to connect to helper process after launch attempt.");
-        cleanupHelperProcess(); // cleanup if you cant connect
+        LT::Utils::Logger::GetInstance().Error("LinuxInput: Failed to connect to helper process.");
+        cleanupHelperProcess(); // Attempt to kill pkexec if connection failed
+        running_ = false;
         return false;
     }
-
-    running_ = true;
-    local_pause_active_ = false; 
+    
     LT::Utils::Logger::GetInstance().Info("LinuxInput: Started successfully.");
     return true;
 }
 
 void LinuxInput::cleanupHelperProcess() {
-    if (helper_pid_ != -1) {
-        LT::Utils::Logger::GetInstance().Info("LinuxInput: Attempting to terminate helper process PID: " + std::to_string(helper_pid_));
-        if (kill(helper_pid_, SIGTERM) == 0) {
-            LT::Utils::Logger::GetInstance().Info("LinuxInput: Sent SIGTERM to helper PID: " + std::to_string(helper_pid_));
-        } else {
-            LT::Utils::Logger::GetInstance().Warning("LinuxInput: Failed to send SIGTERM to helper PID " + std::to_string(helper_pid_) + ". Error: " + strerror(errno));
-        }
-        helper_pid_ = -1; // Reset PID
+    // This function now primarily targets the pkexec_pid_ if it's known,
+    // or the helper_actual_pid_ if pkexec_pid_ is not set (e.g. helper was already running).
+    pid_t pid_to_kill = -1;
+    std::string desc_to_kill;
+
+    if (pkexec_pid_ > 0) {
+        pid_to_kill = pkexec_pid_;
+        desc_to_kill = "pkexec process";
+    } else if (helper_actual_pid_ > 0) {
+        pid_to_kill = helper_actual_pid_;
+        desc_to_kill = "helper process";
     }
-    
-    std::filesystem::remove(helper_pid_file_path_);
-    std::filesystem::remove(helper_socket_path_);
+
+    if (pid_to_kill != -1) {
+        LT::Utils::Logger::GetInstance().Info("LinuxInput: Attempting to terminate " + desc_to_kill + " (PID: " + std::to_string(pid_to_kill) + ")");
+        if (kill(pid_to_kill, SIGTERM) == 0) {
+            LT::Utils::Logger::GetInstance().Info("LinuxInput: Sent SIGTERM to PID: " + std::to_string(pid_to_kill));
+            // Optionally wait for a bit and send SIGKILL if still alive
+        } else {
+            // It might have already exited, or we don't have permission (less likely for pkexec_pid)
+            // LT::Utils::Logger::GetInstance().Warning("LinuxInput: Failed to send SIGTERM to PID " + std::to_string(pid_to_kill) + ". Error: " + strerror(errno));
+        }
+    }
+    pkexec_pid_ = -1; 
+    helper_actual_pid_ = -1;
+
+    // The helper is responsible for unlinking its socket file and SHM on clean exit.
+    // Parent might try to unlink SHM if it thinks it's stale.
+    // shm_unlink(shm_name_); // Consider if parent should do this aggressively
 }
 
 
 void LinuxInput::stop() {
     if (!running_) {
-        LT::Utils::Logger::GetInstance().Info("LinuxInput: Already stopped or not started.");
+        // LT::Utils::Logger::GetInstance().Info("LinuxInput: Already stopped or not started.");
         return;
     }
     LT::Utils::Logger::GetInstance().Info("LinuxInput: Stopping...");
     running_ = false; 
 
     if (helper_connected_ && ipc_socket_.is_open()) {
-        LT::Utils::Logger::GetInstance().Info("LinuxInput: Sending shutdown command to helper.");
-
+        LT::Utils::Logger::GetInstance().Info("LinuxInput: Closing IPC socket.");
         asio::error_code ec;
         ipc_socket_.shutdown(asio::local::stream_protocol::socket::shutdown_both, ec);
-        if (ec) LT::Utils::Logger::GetInstance().Warning("LinuxInput: IPC socket shutdown error: " + ec.message());
         ipc_socket_.close(ec);
-        if (ec) LT::Utils::Logger::GetInstance().Warning("LinuxInput: IPC socket close error: " + ec.message());
     }
     helper_connected_ = false;
 
@@ -227,65 +318,50 @@ void LinuxInput::stop() {
         LT::Utils::Logger::GetInstance().Debug("LinuxInput: Joining IPC thread...");
         ipc_thread_.join();
         LT::Utils::Logger::GetInstance().Debug("LinuxInput: IPC thread joined.");
-    } else {
-        LT::Utils::Logger::GetInstance().Debug("LinuxInput: IPC thread not joinable on stop.");
     }
-
+    
     cleanupHelperProcess(); 
+    close_and_unmap_shared_memory(); // Unmap SHM from parent side
 
     LT::Utils::Logger::GetInstance().Info("LinuxInput: Stopped.");
 }
 
 void LinuxInput::readFromHelperLoop() {
-    if (!helper_connected_ || !ipc_socket_.is_open()) {
-        LT::Utils::Logger::GetInstance().Warning("LinuxInput: Cannot start read loop, not connected.");
+    if (!helper_connected_ || !ipc_socket_.is_open() || !running_) {
         return;
     }
 
     ipc_socket_.async_read_some(asio::buffer(ipc_read_buffer_),
         [this](const std::error_code& ec, std::size_t bytes_transferred) {
-            if (!ec) {
-                if (bytes_transferred >= sizeof(LT::Network::InputPayload)) { // Basic check
-                    LT::Network::InputPayload payload;
-                    memcpy(&payload, ipc_read_buffer_.data(), sizeof(LT::Network::InputPayload)); // Simplistic
+            if (!running_) return; // Stopped during async op
 
+            if (!ec) {
+                if (bytes_transferred >= sizeof(LT::Network::InputPayload)) { 
+                    LT::Network::InputPayload payload;
+                    memcpy(&payload, ipc_read_buffer_.data(), sizeof(LT::Network::InputPayload)); 
                     {
                         std::lock_guard<std::mutex> lock(queue_mutex_);
                         received_payloads_queue_.push_back(payload);
                     }
-                    LT::Utils::Logger::GetInstance().Debug("LinuxInput: Received payload from helper.");
                 } else if (bytes_transferred > 0) {
                     LT::Utils::Logger::GetInstance().Warning("LinuxInput: Received partial/invalid data from helper: " + std::to_string(bytes_transferred) + " bytes.");
                 }
                 
                 if (helper_connected_.load(std::memory_order_relaxed) && running_.load(std::memory_order_relaxed)) {
-                    readFromHelperLoop();
-                } else {
-                    LT::Utils::Logger::GetInstance().Info("LinuxInput: Stopping read loop as helper disconnected or not running.");
+                    readFromHelperLoop(); // Continue reading
                 }
             } else {
-                if (ec == asio::error::eof || ec == asio::error::connection_reset) {
-                    LT::Utils::Logger::GetInstance().Info("LinuxInput: Helper IPC disconnected (EOF/reset).");
-                } else if (ec == asio::error::operation_aborted) {
-                    LT::Utils::Logger::GetInstance().Info("LinuxInput: Helper IPC read operation aborted (likely during stop).");
-                }
-                else {
+                if (ec != asio::error::operation_aborted) { // Aborted is expected on stop
                     LT::Utils::Logger::GetInstance().Error("LinuxInput: Error reading from helper IPC: " + ec.message());
                 }
                 helper_connected_ = false; 
-                
             }
         });
 }
 
 std::vector<LT::Network::InputPayload> LinuxInput::pollEvents() {
-    if (!running_.load(std::memory_order_relaxed)) {
-        return {};
-    }
-    if (!helper_connected_.load(std::memory_order_relaxed)) {
-        LT::Utils::Logger::GetInstance().Warning("LinuxInput: pollEvents called but helper not connected.");
-        return {};
-    }
+    if (!running_.load(std::memory_order_relaxed)) return {};
+    if (!helper_connected_.load(std::memory_order_relaxed)) return {};
 
     std::vector<LT::Network::InputPayload> current_payloads;
     {
@@ -294,33 +370,28 @@ std::vector<LT::Network::InputPayload> LinuxInput::pollEvents() {
             current_payloads.swap(received_payloads_queue_);
         }
     }
-
     return current_payloads;
 }
 
 void LinuxInput::sendCommandToHelper(IPCCommandType cmdType, const std::vector<uint8_t>& data) {
     if (!helper_connected_ || !ipc_socket_.is_open()) {
-        LT::Utils::Logger::GetInstance().Warning("LinuxInput: Cannot send command to helper, not connected. Cmd: " + std::to_string(static_cast<int>(cmdType)));
         return;
     }
-
     std::vector<uint8_t> message;
     message.push_back(static_cast<uint8_t>(cmdType));
     message.insert(message.end(), data.begin(), data.end());
 
     asio::async_write(ipc_socket_, asio::buffer(message),
         [this, cmdType](const std::error_code& ec, std::size_t ) {
-            if (ec) {
+            if (ec && ec != asio::error::operation_aborted) {
                 LT::Utils::Logger::GetInstance().Error("LinuxInput: Error writing command " + std::to_string(static_cast<int>(cmdType)) + " to helper IPC: " + ec.message());
                 helper_connected_ = false;
-            } else {
-                LT::Utils::Logger::GetInstance().Debug("LinuxInput: Successfully sent command " + std::to_string(static_cast<int>(cmdType)) + " to helper.");
             }
         });
 }
+
 void LinuxInput::sendPayloadToHelper(IPCCommandType cmdType, const LT::Network::InputPayload& payload) {
      if (!helper_connected_ || !ipc_socket_.is_open()) {
-        LT::Utils::Logger::GetInstance().Warning("LinuxInput: Cannot send payload to helper, not connected. Cmd: " + std::to_string(static_cast<int>(cmdType)));
         return;
     }
     std::vector<uint8_t> message;
@@ -329,12 +400,10 @@ void LinuxInput::sendPayloadToHelper(IPCCommandType cmdType, const LT::Network::
     message.insert(message.end(), payload_bytes, payload_bytes + sizeof(payload));
 
     asio::async_write(ipc_socket_, asio::buffer(message),
-        [this, cmdType](const std::error_code& ec, std::size_t /*bytes_transferred*/) {
-            if (ec) {
+        [this, cmdType](const std::error_code& ec, std::size_t ) {
+            if (ec && ec != asio::error::operation_aborted) {
                 LT::Utils::Logger::GetInstance().Error("LinuxInput: Error writing payload cmd " + std::to_string(static_cast<int>(cmdType)) + " to helper IPC: " + ec.message());
                 helper_connected_ = false;
-            } else {
-                LT::Utils::Logger::GetInstance().Debug("LinuxInput: Successfully sent payload cmd " + std::to_string(static_cast<int>(cmdType)) + " to helper.");
             }
         });
 }
@@ -342,30 +411,20 @@ void LinuxInput::sendPayloadToHelper(IPCCommandType cmdType, const LT::Network::
 
 void LinuxInput::simulateInput(const LT::Network::InputPayload& payload) {
     if (!running_ || !helper_connected_) {
-        LT::Utils::Logger::GetInstance().Warning("LinuxInput: Cannot simulate input, not running or helper not connected.");
         return;
     }
-    LT::Utils::Logger::GetInstance().Debug("LinuxInput: Queuing input simulation request to helper.");
     sendPayloadToHelper(IPCCommandType::SimulateInput, payload);
 }
 
 void LinuxInput::setInputPaused(bool paused) {
     if (local_pause_active_ == paused) return; 
-
     local_pause_active_ = paused;
-    if (paused) {
-        LT::Utils::Logger::GetInstance().Info("LinuxInput: Instructing helper to PAUSE input stream.");
-        sendCommandToHelper(IPCCommandType::PauseStream);
-    } else {
-        LT::Utils::Logger::GetInstance().Info("LinuxInput: Instructing helper to RESUME input stream.");
-        sendCommandToHelper(IPCCommandType::ResumeStream);
-    }
+    sendCommandToHelper(paused ? IPCCommandType::PauseStream : IPCCommandType::ResumeStream);
 }
 
 bool LinuxInput::isInputPaused() const {
-    return local_pause_active_;
+    return local_pause_active_.load(std::memory_order_relaxed);
 }
-
 
 } 
 #endif 

@@ -12,6 +12,7 @@ namespace LocalTether::Utils {
     }
     
     Logger::Logger() {
+        
          logFile.open("application.log", std::ios::out | std::ios::app); // Open in append mode
         if (!logFile.is_open()) {
             std::cerr << "CRITICAL: Failed to open log file: application.log" << std::endl;

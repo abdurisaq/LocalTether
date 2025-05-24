@@ -29,13 +29,13 @@ install_build_essentials() {
     case $(detect_package_manager) in
         apt)
             sudo apt update
-            sudo apt install -y build-essential cmake git curl ninja-build pkg-config libtool autoconf automake
+            sudo apt install -y build-essential cmake git curl ninja-build pkg-config libtool autoconf automake libudev-dev
             ;;
         pacman)
-            sudo pacman -Sy --noconfirm base-devel cmake git curl ninja pkgconf libtool autoconf automake
+            sudo pacman -Sy --noconfirm base-devel cmake git curl ninja pkgconf libtool autoconf automake systemd
             ;;
         dnf)
-            sudo dnf install -y gcc gcc-c++ make cmake git curl ninja-build pkgconf libtool autoconf automake
+            sudo dnf install -y gcc gcc-c++ make cmake git curl ninja-build pkgconf libtool autoconf automake systemd-devel
             ;;
         *)
             echo "Unsupported package manager" >&2
