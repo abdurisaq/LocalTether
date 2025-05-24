@@ -117,6 +117,10 @@ void Server::doAccept() {
 }
 
 void Server::handleMessage(std::shared_ptr<Session> session, const Message& message) {
+    LocalTether::Utils::Logger::GetInstance().Debug(
+        "Received message from: " + session->getClientAddress() + 
+        " (ID: " + std::to_string(session->getClientId()) + 
+        ", Type: " + std::to_string(static_cast<int>(message.getType())) + ")");
     switch (message.getType()) {
         case MessageType::Handshake: {
         
@@ -176,22 +180,23 @@ void Server::handleMessage(std::shared_ptr<Session> session, const Message& mess
 
 void Server::processHandshake(std::shared_ptr<Session> session, const Message& message) {
     try {
-        auto handshakeData = message.getHandshakePayload(); // Use the new structured payload
+        auto handshakeData = message.getHandshakePayload(); 
         
         bool isAuthenticated = false;
-        if (!password.empty()) { // Server's password for joining
+        if (!password.empty()) { 
             isAuthenticated = (handshakeData.password == password);
         } else {
-            isAuthenticated = true; // No password set on server
+            isAuthenticated = true; 
         }
         
         if (isAuthenticated) {
-            session->setRole(handshakeData.role);
-            session->setClientName(handshakeData.clientName);
-            // session->setClientId() is already done when session is created in doAccept
+            
+            if(hostClientId_ != 0 && hostClientId_ != session->getClientId()) {
+                session->setRole(ClientRole::Receiver);
+            }
 
-            // If this client is connecting as Host, designate it.
-            // Allow only one Host. If another tries, decide policy (e.g., reject or replace).
+            session->setClientName(handshakeData.clientName);
+            
             if (handshakeData.role == ClientRole::Host) {
                 if (hostClientId_ == 0) {
                     hostClientId_ = session->getClientId();
@@ -200,20 +205,15 @@ void Server::processHandshake(std::shared_ptr<Session> session, const Message& m
                 } else if (hostClientId_ != session->getClientId()) {
                     LocalTether::Utils::Logger::GetInstance().Warning(
                         "Client " + handshakeData.clientName + " tried to connect as Host, but Host (ID: " + std::to_string(hostClientId_) + ") already exists. Rejecting role.");
-                    // Optionally, send a message back indicating role rejection or disconnect.
-                    // For now, we'll let them connect but not as host.
-                    // Or, enforce the role from client side and server just confirms.
-                    // Let's assume client correctly states its role.
+                    
                 }
             }
-            
-            // Send handshake confirmation back to the client
-            // The client ID in the response should be its own ID assigned by the server.
+
             auto response = Message::createHandshake(
-                session->getRole(), // Confirm their role
-                "Server",           // Server's name
-                "",                 // No password in response
-                session->getClientId() // Send their assigned client ID
+                session->getRole(),
+                "Server",          
+                "",              
+                session->getClientId() 
             );
             session->send(response);
             
@@ -229,12 +229,12 @@ void Server::processHandshake(std::shared_ptr<Session> session, const Message& m
                 "Authentication failed for: " + session->getClientAddress() + " with name " + handshakeData.clientName);
             auto response = Message::createCommand("auth_failed", 0); // Server (ID 0) sends command
             session->send(response);
-            session->close(); // Or mark for closure
+            session->close(); 
         }
     } catch (const std::exception& e) {
         LocalTether::Utils::Logger::GetInstance().Error(
             "Handshake processing error: " + std::string(e.what()));
-        session->close(); // Or mark for closure
+        session->close(); 
     }
 }
 

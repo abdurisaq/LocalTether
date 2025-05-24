@@ -7,6 +7,8 @@
 #include "ui/panels/NetworkSettingsPanel.h"
 #include "ui/panels/PropertiesPanel.h"
 #include "utils/Logger.h"
+#include "input/InputManager.h"
+#include "input/LinuxInputHelper.h"
 
 #include <asio.hpp>
 #include <openssl/ssl.h>
@@ -26,6 +28,14 @@
 namespace LT = LocalTether;
 
 int main(int argc, char** argv) {
+    #ifndef _WIN32
+    if (argc > 1 && std::string(argv[1]) == "--input-helper-mode") {
+        
+        LocalTether::Utils::Logger::GetInstance().Log("Input helper mode starting", LocalTether::Utils::LogLevel::Info);
+        return LocalTether::Input::runInputHelperMode(); 
+    }
+    #endif
+
     LT::Core::SDLApp app("LocalTether");
     if (!app.Initialize()) {
         return -1;

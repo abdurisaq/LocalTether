@@ -92,7 +92,7 @@ else
     popd
 fi
 # Install libraries with static linking flags
-"$VCPKG_DIR/vcpkg" install asio  openssl glad --triplet x64-linux
+"$VCPKG_DIR/vcpkg" install asio  openssl glad libevdev --triplet x64-linux
 
 # Create build directory and configure CMake
 mkdir -p "$BUILD_DIR"

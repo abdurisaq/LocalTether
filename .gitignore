@@ -2,5 +2,4 @@ vcpkg/
 external/
 build/
 .cache/
-application.log
-ipAddress.txt
+compile_commands.json

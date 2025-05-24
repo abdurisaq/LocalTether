@@ -154,7 +154,7 @@ void Client::inputLoop() {
         auto payloads = inputManager_->pollEvents();
         for (const auto& payload : payloads) {
             if (state_ == ClientState::Connected) {
-                LocalTether::Utils::Logger::GetInstance().Info("Sending input...");
+                
                  sendInput(payload);
             }
         }

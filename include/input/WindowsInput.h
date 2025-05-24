@@ -27,7 +27,7 @@ public:
     void stop() override;
     std::vector<LocalTether::Network::InputPayload> pollEvents() override;
     void simulateInput(const LocalTether::Network::InputPayload& payload) override;
-
+    void setPauseKeyBinds(const std::vector<int>& pauseKeyBinds);
 private:
 
     std::vector<BYTE> currentKeys_;
@@ -39,7 +39,8 @@ private:
     BYTE lastMouseButtons_ = 0;
 
     std::atomic<bool> running_{false};
-
+    std::atomic<bool> inputSendingPaused_{false};
+    std::vector<int> pauseKeyBinds_;
   
     std::vector<LocalTether::Network::KeyEvent> findKeyChanges();
     LocalTether::Network::InputPayload pollMouseEvents();
@@ -47,7 +48,11 @@ private:
     void updateKeyState(uint8_t vkCode, bool pressed);
     bool isBitSet(uint8_t vkCode) const;
     static double calculateDistance(POINT a, POINT b);
+
+     POINT lastPolledMousePos_ = {0, 0};
+     bool firstPoll_ = true;
+
 };
 
 } 
-#endif // _WIN32
+#endif 

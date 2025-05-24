@@ -24,6 +24,15 @@ find_package(asio CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(glad CONFIG REQUIRED)
 
+if(UNIX AND NOT APPLE)
+find_package(PkgConfig REQUIRED) # Make sure PkgConfig itself is found
+pkg_check_modules(LIBEVDEV REQUIRED libevdev)
+
+message(STATUS "LIBEVDEV_LIBRARIES: ${LIBEVDEV_LIBRARIES}")
+message(STATUS "LIBEVDEV_LINK_LIBRARIES: ${LIBEVDEV_LINK_LIBRARIES}")
+message(STATUS "LIBEVDEV_LIBRARY_DIRS: ${LIBEVDEV_LIBRARY_DIRS}")
+
+endif()
 # Platform specific dependencies
 if(UNIX AND NOT APPLE)
     find_package(PkgConfig QUIET)
@@ -57,7 +66,7 @@ file(GLOB_RECURSE UI_PANEL_SOURCES "src/ui/panels/*.cpp")
 file(GLOB_RECURSE UTILS_SOURCES "src/utils/*.cpp")
 file(GLOB_RECURSE NETWORK_SOURCES "src/network/*.cpp")
 file(GLOB_RECURSE INPUT_SOURCE "src/input/*.cpp")
-
+file(GLOB_RECURSE UTIL_SOURCE "src/utils/*.cpp")
 # Combine all sources
 set(SOURCES
     src/main.cpp
@@ -67,10 +76,30 @@ set(SOURCES
     ${UTILS_SOURCES}
     ${NETWORK_SOURCES}
     ${INPUT_SOURCE}
+    ${UTIL_SOURCE}
 )
 
 # Create executable
 add_executable(LocalTether ${SOURCES} ${IMGUI_SOURCES})
+
+if(UNIX AND NOT APPLE)
+  
+    if(LIBEVDEV_FOUND) 
+        target_include_directories(LocalTether PRIVATE ${LIBEVDEV_INCLUDE_DIRS})
+
+        link_directories(${LIBEVDEV_LIBRARY_DIRS})
+
+        if(LIBEVDEV_LINK_LIBRARIES)
+            target_link_libraries(LocalTether PRIVATE ${LIBEVDEV_LINK_LIBRARIES})
+        else()
+            target_link_libraries(LocalTether PRIVATE ${LIBEVDEV_LDFLAGS})
+        endif()
+        target_link_libraries(LocalTether PRIVATE udev)
+    else()
+        message(FATAL_ERROR "libevdev not found by pkg-config. Please ensure it is installed correctly via vcpkg.")
+    endif()
+    
+endif()
 
 # Include paths
 target_include_directories(LocalTether PRIVATE
@@ -95,6 +124,14 @@ if(UNIX AND NOT APPLE)
         target_include_directories(LocalTether PRIVATE ${POLKIT_INCLUDE_DIRS})
         target_link_libraries(LocalTether PRIVATE ${POLKIT_LIBRARIES})
     endif()
+endif()
+
+if(UNIX AND NOT APPLE)
+
+    install(FILES com.localtether.policy
+            DESTINATION /usr/share/polkit-1/actions/
+    )
+    
 endif()
 
 # No console on Windows

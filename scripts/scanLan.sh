@@ -1,6 +1,6 @@
 #!/bin/bash
 
-outputFile="ipAddress.txt"
+outputFile="ipaddress.txt"
 > "$outputFile"
 
 

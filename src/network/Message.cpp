@@ -19,7 +19,6 @@ Message Message::createInput(const std::vector<uint8_t>& inputData, uint32_t cli
 Message Message::createInput(const InputPayload& inputPayload, uint32_t clientId) {
     std::vector<uint8_t> data;
 
-
     uint8_t flags = 0;
     if (inputPayload.isMouseEvent) {
         flags |= 0x01;
@@ -28,7 +27,7 @@ Message Message::createInput(const InputPayload& inputPayload, uint32_t clientId
 
     uint8_t numKeyEvents = static_cast<uint8_t>(inputPayload.keyEvents.size());
     if (inputPayload.keyEvents.size() > 255) {
-        numKeyEvents = 255;
+        numKeyEvents = 255; 
     }
     data.push_back(numKeyEvents);
 
@@ -39,11 +38,17 @@ Message Message::createInput(const InputPayload& inputPayload, uint32_t clientId
     }
 
     if (inputPayload.isMouseEvent) {
-        data.push_back(static_cast<uint8_t>((inputPayload.mouseX >> 8) & 0xFF));
-        data.push_back(static_cast<uint8_t>(inputPayload.mouseX & 0xFF));
-        data.push_back(static_cast<uint8_t>((inputPayload.mouseY >> 8) & 0xFF));
-        data.push_back(static_cast<uint8_t>(inputPayload.mouseY & 0xFF));
+        
+        data.push_back(static_cast<uint8_t>((inputPayload.deltaX >> 8) & 0xFF));
+        data.push_back(static_cast<uint8_t>(inputPayload.deltaX & 0xFF));
+        data.push_back(static_cast<uint8_t>((inputPayload.deltaY >> 8) & 0xFF));
+        data.push_back(static_cast<uint8_t>(inputPayload.deltaY & 0xFF));
         data.push_back(inputPayload.mouseButtons);
+        
+        data.push_back(static_cast<uint8_t>((inputPayload.scrollDeltaX >> 8) & 0xFF));
+        data.push_back(static_cast<uint8_t>(inputPayload.scrollDeltaX & 0xFF));
+        data.push_back(static_cast<uint8_t>((inputPayload.scrollDeltaY >> 8) & 0xFF));
+        data.push_back(static_cast<uint8_t>(inputPayload.scrollDeltaY & 0xFF));
     }
 
     return Message(MessageType::Input, clientId, data);
@@ -113,22 +118,30 @@ InputPayload Message::getInputPayload() const {
     InputPayload p;
     if (payload.empty()) {
         Utils::Logger::GetInstance().Warning("Received empty Input payload.");
-        return p;
+        return p; 
     }
 
     size_t offset = 0;
 
-    if (offset >= payload.size()) throw std::runtime_error("Input payload too short for flags.");
+    auto check_payload_size = [&](size_t needed, const char* field_name) {
+        if (offset + needed > payload.size()) {
+            throw std::runtime_error(std::string("Input payload too short for ") + field_name + 
+                                     ". Need " + std::to_string(needed) + 
+                                     ", have " + std::to_string(payload.size() - offset) + 
+                                     " at offset " + std::to_string(offset));
+        }
+    };
+
+    check_payload_size(1, "flags");
     uint8_t flags = payload[offset++];
     p.isMouseEvent = (flags & 0x01) != 0;
 
-    // NumKeyEvents
-    if (offset >= payload.size()) throw std::runtime_error("Input payload too short for numKeyEvents.");
+    check_payload_size(1, "numKeyEvents");
     uint8_t numKeyEvents = payload[offset++];
 
     p.keyEvents.reserve(numKeyEvents);
     for (uint8_t i = 0; i < numKeyEvents; ++i) {
-        if (offset + 1 >= payload.size()) throw std::runtime_error("Input payload too short for KeyEvent data.");
+        check_payload_size(2, "KeyEvent data");
         KeyEvent event;
         event.keyCode = payload[offset++];
         event.isPressed = (payload[offset++] != 0);
@@ -136,12 +149,19 @@ InputPayload Message::getInputPayload() const {
     }
 
     if (p.isMouseEvent) {
-        if (offset + 4 >= payload.size()) throw std::runtime_error("Input payload too short for mouse data.");
-        p.mouseX = static_cast<int16_t>((static_cast<uint16_t>(payload[offset]) << 8) | payload[offset+1]);
+        check_payload_size(5, "mouse data (deltas + buttons)"); // 2 for deltaX, 2 for deltaY, 1 forr buttons
+        p.deltaX = static_cast<int16_t>((static_cast<uint16_t>(payload[offset]) << 8) | payload[offset+1]);
         offset += 2;
-        p.mouseY = static_cast<int16_t>((static_cast<uint16_t>(payload[offset]) << 8) | payload[offset+1]);
+        p.deltaY = static_cast<int16_t>((static_cast<uint16_t>(payload[offset]) << 8) | payload[offset+1]);
         offset += 2;
         p.mouseButtons = payload[offset++];
+
+        if (offset + 4 <= payload.size()) { 
+            p.scrollDeltaX = static_cast<int16_t>((static_cast<uint16_t>(payload[offset]) << 8) | payload[offset+1]);
+            offset += 2;
+            p.scrollDeltaY = static_cast<int16_t>((static_cast<uint16_t>(payload[offset]) << 8) | payload[offset+1]);
+            offset += 2;
+        }
     }
     return p;
 }

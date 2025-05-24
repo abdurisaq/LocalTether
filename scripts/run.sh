@@ -28,29 +28,12 @@ popd
 
 
 EXE_PATH="$BUILD_DIR/LocalTether"
-LOG_FILE="$BUILD_DIR/LocalTetherOutput.log"
 if [[ -f "$EXE_PATH" ]]; then
     echo "Running LocalTether..."
     chmod +x "$EXE_PATH"
-
-    nohup "$EXE_PATH" > "$LOG_FILE" 2>&1 &
-
-    BG_PID=$! #the pid of launched file
-
-    sleep 0.5
-
-    if ps -p $BG_PID > /dev/null; then
-        echo "LocalTether launched in background"
-        echo " PID: $BG_PID"
-        echo " output redirected to: $LOG_FILE"
-
-    else
-        echo "failed to launch LocalTether in the background"
-
-    fi
-
-
+    "$EXE_PATH"
 else
     echo "Executable not found at $EXE_PATH"
     exit 1
 fi
+

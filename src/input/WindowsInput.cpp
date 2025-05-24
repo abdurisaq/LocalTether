@@ -8,7 +8,9 @@ namespace LocalTether::Input {
 
 
 WindowsInput::WindowsInput() {
-
+    firstPoll_ = true;
+    lastPolledMousePos_ = {0, 0};
+    inputSendingPaused_ = false;
 }
 
 WindowsInput::~WindowsInput() {
@@ -24,6 +26,9 @@ bool WindowsInput::start() {
     keyPressTimes_.clear();
     lastSentMousePos_ = {-1, -1};
     lastMouseButtons_ = 0;
+    inputSendingPaused_ = false;
+    firstPoll_ = true;
+    lastPolledMousePos_ = {0, 0};
     LocalTether::Utils::Logger::GetInstance().Info("WindowsInput started.");
     return true;
 }
@@ -34,21 +39,77 @@ void WindowsInput::stop() {
 }
 
 std::vector<LocalTether::Network::InputPayload> WindowsInput::pollEvents() {
-    if (!running_) {
+    if (!running_.load(std::memory_order_relaxed)) {
         return {};
+    }
+    if(inputSendingPaused_.load(std::memory_order_relaxed)) {
+        
+        bool pauseComboStillHeld = true;
+        if (pauseKeyBinds_.empty()) { 
+             pauseComboStillHeld = false;
+        } else {
+            for (const auto& key : pauseKeyBinds_) {
+                if (!(GetAsyncKeyState(key) & 0x8000)) {
+                    pauseComboStillHeld = false;
+                    break;
+                }
+            }
+        }
+        if(!pauseComboStillHeld && !pauseKeyBinds_.empty()) { 
+            LocalTether::Utils::Logger::GetInstance().Info("Input sending resumed (pause combo released).");
+            inputSendingPaused_ = false;
+        } else {
+            return {}; 
+        }
     }
 
     std::vector<LocalTether::Network::InputPayload> payloads;
 
+
     auto keyEvents = findKeyChanges();
     if (!keyEvents.empty()) {
+        
+        if (!pauseKeyBinds_.empty()) {
+            std::vector<BYTE> currentlyPressedVkCodes;
+            for(const auto& ke : keyEvents) {
+                if(ke.isPressed) currentlyPressedVkCodes.push_back(ke.keyCode);
+            }
+
+            bool pauseComboActive = true;
+            if (currentlyPressedVkCodes.size() < pauseKeyBinds_.size()) { 
+                pauseComboActive = false;
+            } else {
+                for (int pKey : pauseKeyBinds_) {
+                    bool found = false;
+                    for (BYTE cKey : currentlyPressedVkCodes) {
+                        if (cKey == pKey) {
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        pauseComboActive = false;
+                        break;
+                    }
+                }
+            }
+
+            if (pauseComboActive && currentlyPressedVkCodes.size() == pauseKeyBinds_.size()) {
+                 inputSendingPaused_ = true;
+                 LocalTether::Utils::Logger::GetInstance().Info("Input sending paused by combo.");
+                 
+                 return {}; 
+            }
+        }
+       
         LocalTether::Network::InputPayload kbdPayload;
         kbdPayload.isMouseEvent = false;
         kbdPayload.keyEvents = std::move(keyEvents);
         payloads.push_back(kbdPayload);
     }
 
-    LocalTether::Network::InputPayload mousePayload = pollMouseEvents();
+    // Poll Mouse Events
+    LocalTether::Network::InputPayload mousePayload = pollMouseEvents(); 
     if (mousePayload.isMouseEvent) { 
         payloads.push_back(mousePayload);
     }
@@ -111,37 +172,49 @@ std::vector<LocalTether::Network::KeyEvent> WindowsInput::findKeyChanges() {
     return changes;
 }
 
+
+void WindowsInput::setPauseKeyBinds(const std::vector<int>& pauseKeyBinds) {
+        pauseKeyBinds_ = pauseKeyBinds;
+    }
 LocalTether::Network::InputPayload WindowsInput::pollMouseEvents() {
-    LocalTether::Network::InputPayload payload;
-    payload.isMouseEvent = false; 
+    LocalTether::Network::InputPayload payload; 
+
+    if (!running_.load(std::memory_order_relaxed) || inputSendingPaused_.load(std::memory_order_relaxed)) {
+        return payload; 
+    }
 
     POINT currentPos;
     if (GetCursorPos(&currentPos)) {
-        BYTE currentButtons = 0;
-        if (GetAsyncKeyState(VK_LBUTTON) & 0x8000) currentButtons |= 0x01;
-        if (GetAsyncKeyState(VK_RBUTTON) & 0x8000) currentButtons |= 0x02;
-        if (GetAsyncKeyState(VK_MBUTTON) & 0x8000) currentButtons |= 0x04;
-        
-        if (GetAsyncKeyState(VK_XBUTTON1) & 0x8000) currentButtons |= 0x08;
-        if (GetAsyncKeyState(VK_XBUTTON2) & 0x8000) currentButtons |= 0x10;
-
-
-        bool posChanged = (lastSentMousePos_.x != currentPos.x || lastSentMousePos_.y != currentPos.y);
-        bool buttonsChanged = (lastMouseButtons_ != currentButtons);
-
-        if (posChanged || buttonsChanged) {
-            if (lastSentMousePos_.x == -1 && lastSentMousePos_.y == -1 && !buttonsChanged) {
-                
-            } else {
-                 payload.isMouseEvent = true;
-                 payload.mouseX = static_cast<int16_t>(currentPos.x);
-                 payload.mouseY = static_cast<int16_t>(currentPos.y);
-                 payload.mouseButtons = currentButtons;
-            }
-            lastSentMousePos_ = currentPos;
-            lastMouseButtons_ = currentButtons;
+        if (firstPoll_) {
+            lastPolledMousePos_ = currentPos;
+            firstPoll_ = false;
+            payload.deltaX = 0;
+            payload.deltaY = 0;
+        } else {
+            payload.deltaX = static_cast<int16_t>(currentPos.x - lastPolledMousePos_.x);
+            payload.deltaY = static_cast<int16_t>(currentPos.y - lastPolledMousePos_.y);
+            lastPolledMousePos_ = currentPos;
         }
+
+        if (GetAsyncKeyState(VK_LBUTTON) & 0x8000) payload.mouseButtons |= 0x01;
+        if (GetAsyncKeyState(VK_RBUTTON) & 0x8000) payload.mouseButtons |= 0x02;
+        if (GetAsyncKeyState(VK_MBUTTON) & 0x8000) payload.mouseButtons |= 0x04;
+        if (GetAsyncKeyState(VK_XBUTTON1) & 0x8000) payload.mouseButtons |= 0x08;
+        if (GetAsyncKeyState(VK_XBUTTON2) & 0x8000) payload.mouseButtons |= 0x10;
+
+
+        if (payload.deltaX != 0 || payload.deltaY != 0 || payload.mouseButtons != 0) {
+            payload.isMouseEvent = true;
+        }
+    } else {
+        // Failed to get cursor position, log or handle
+        LocalTether::Utils::Logger::GetInstance().Error("WindowsInput: GetCursorPos failed. Error: " + std::to_string(GetLastError()));
     }
+
+    //haven't figured out how to poll scroll wheel yet, left at 0 for now
+    payload.scrollDeltaX = 0;
+    payload.scrollDeltaY = 0;
+
     return payload;
 }
 
@@ -176,68 +249,90 @@ double WindowsInput::calculateDistance(POINT a, POINT b) {
 
 void WindowsInput::simulateInput(const LocalTether::Network::InputPayload& payload) {
 #ifdef _WIN32
+    if (!running_.load(std::memory_order_relaxed)) {
+        //probably log here, maybe laters
+        return;
+    }
+
     std::vector<INPUT> inputs;
 
-    // Simulate Key Events
     for (const auto& keyEvent : payload.keyEvents) {
+        if (keyEvent.keyCode == 0) continue; 
+
         INPUT input = {0};
         input.type = INPUT_KEYBOARD;
         input.ki.wVk = keyEvent.keyCode;
         input.ki.dwFlags = keyEvent.isPressed ? 0 : KEYEVENTF_KEYUP;
-        // Consider adding KEYEVENTF_SCANCODE and input.ki.wScan = MapVirtualKey(keyEvent.keyCode, MAPVK_VK_TO_VSC);
-        // For extended keys, set KEYEVENTF_EXTENDEDKEY if necessary
-        // Example: if (keyEvent.keyCode == VK_RIGHT || ... ) input.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
+
+        switch (keyEvent.keyCode) {
+            case VK_RCONTROL:
+            case VK_RMENU:
+            case VK_INSERT:
+            case VK_DELETE:
+            case VK_HOME:
+            case VK_END:
+            case VK_PRIOR: // Page Up
+            case VK_NEXT:  // Page Down
+            case VK_UP:
+            case VK_DOWN:
+            case VK_LEFT:
+            case VK_RIGHT:
+            case VK_APPS:
+            case VK_LWIN:
+            case VK_RWIN:
+            case VK_SNAPSHOT: 
+   
+                input.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
+                break;
+            default:
+              
+                UINT scanCode = MapVirtualKeyEx(keyEvent.keyCode, MAPVK_VK_TO_VSC_EX, GetKeyboardLayout(0));
+                if (scanCode & 0xFF00) { 
+                    input.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
+                }
+                break;
+        }
         inputs.push_back(input);
     }
 
-    // Simulate Mouse Event
+    // changed to deltas instead
     if (payload.isMouseEvent) {
-        // Mouse Movement: SetCursorPos is simpler for absolute screen coordinates.
-        // SendInput with MOUSEEVENTF_MOVE is typically for relative moves or when combining with button presses.
-        SetCursorPos(payload.mouseX, payload.mouseY);
+        
+        if (payload.deltaX != 0 || payload.deltaY != 0) {
+            INPUT moveInput = {0};
+            moveInput.type = INPUT_MOUSE;
+            moveInput.mi.dx = payload.deltaX;
+            moveInput.mi.dy = payload.deltaY;
+            moveInput.mi.dwFlags = MOUSEEVENTF_MOVE;
+            inputs.push_back(moveInput);
+        }
 
-        // Mouse Buttons
-        // This logic sends discrete down/up events based on state changes.
-        static BYTE lastSimulatedMouseButtons = 0; // Static to remember state across calls within this instance
-
-        // Left Button
-        if ((payload.mouseButtons & 0x01) && !(lastSimulatedMouseButtons & 0x01)) { // Press
-            INPUT btnInput = {0}; btnInput.type = INPUT_MOUSE; btnInput.mi.dwFlags = MOUSEEVENTF_LEFTDOWN; inputs.push_back(btnInput);
-        } else if (!(payload.mouseButtons & 0x01) && (lastSimulatedMouseButtons & 0x01)) { // Release
-            INPUT btnInput = {0}; btnInput.type = INPUT_MOUSE; btnInput.mi.dwFlags = MOUSEEVENTF_LEFTUP; inputs.push_back(btnInput);
+       //still defaulting to 0 , not implemented yet
+        if (payload.scrollDeltaY != 0) {
+            INPUT scrollInput = {0};
+            scrollInput.type = INPUT_MOUSE;
+            scrollInput.mi.dwFlags = MOUSEEVENTF_WHEEL;
+            scrollInput.mi.mouseData = static_cast<DWORD>(payload.scrollDeltaY); 
+            inputs.push_back(scrollInput);
         }
-        // Right Button
-        if ((payload.mouseButtons & 0x02) && !(lastSimulatedMouseButtons & 0x02)) {
-            INPUT btnInput = {0}; btnInput.type = INPUT_MOUSE; btnInput.mi.dwFlags = MOUSEEVENTF_RIGHTDOWN; inputs.push_back(btnInput);
-        } else if (!(payload.mouseButtons & 0x02) && (lastSimulatedMouseButtons & 0x02)) {
-            INPUT btnInput = {0}; btnInput.type = INPUT_MOUSE; btnInput.mi.dwFlags = MOUSEEVENTF_RIGHTUP; inputs.push_back(btnInput);
+        if (payload.scrollDeltaX != 0) {
+            INPUT hScrollInput = {0};
+            hScrollInput.type = INPUT_MOUSE;
+            hScrollInput.mi.dwFlags = MOUSEEVENTF_HWHEEL; 
+            hScrollInput.mi.mouseData = static_cast<DWORD>(payload.scrollDeltaX);
+            inputs.push_back(hScrollInput);
         }
-        // Middle Button
-        if ((payload.mouseButtons & 0x04) && !(lastSimulatedMouseButtons & 0x04)) {
-            INPUT btnInput = {0}; btnInput.type = INPUT_MOUSE; btnInput.mi.dwFlags = MOUSEEVENTF_MIDDLEDOWN; inputs.push_back(btnInput);
-        } else if (!(payload.mouseButtons & 0x04) && (lastSimulatedMouseButtons & 0x04)) {
-            INPUT btnInput = {0}; btnInput.type = INPUT_MOUSE; btnInput.mi.dwFlags = MOUSEEVENTF_MIDDLEUP; inputs.push_back(btnInput);
-        }
-        // XBUTTON1
-        if ((payload.mouseButtons & 0x08) && !(lastSimulatedMouseButtons & 0x08)) {
-            INPUT btnInput = {0}; btnInput.type = INPUT_MOUSE; btnInput.mi.dwFlags = MOUSEEVENTF_XDOWN; btnInput.mi.mouseData = XBUTTON1; inputs.push_back(btnInput);
-        } else if (!(payload.mouseButtons & 0x08) && (lastSimulatedMouseButtons & 0x08)) {
-            INPUT btnInput = {0}; btnInput.type = INPUT_MOUSE; btnInput.mi.dwFlags = MOUSEEVENTF_XUP; btnInput.mi.mouseData = XBUTTON1; inputs.push_back(btnInput);
-        }
-        // XBUTTON2
-        if ((payload.mouseButtons & 0x10) && !(lastSimulatedMouseButtons & 0x10)) {
-            INPUT btnInput = {0}; btnInput.type = INPUT_MOUSE; btnInput.mi.dwFlags = MOUSEEVENTF_XDOWN; btnInput.mi.mouseData = XBUTTON2; inputs.push_back(btnInput);
-        } else if (!(payload.mouseButtons & 0x10) && (lastSimulatedMouseButtons & 0x10)) {
-            INPUT btnInput = {0}; btnInput.type = INPUT_MOUSE; btnInput.mi.dwFlags = MOUSEEVENTF_XUP; btnInput.mi.mouseData = XBUTTON2; inputs.push_back(btnInput);
-        }
-        lastSimulatedMouseButtons = payload.mouseButtons;
+        
     }
 
     if (!inputs.empty()) {
-        SendInput(static_cast<UINT>(inputs.size()), inputs.data(), sizeof(INPUT));
+        UINT uSent = SendInput(static_cast<UINT>(inputs.size()), inputs.data(), sizeof(INPUT));
+        if (uSent != inputs.size()) {
+            LocalTether::Utils::Logger::GetInstance().Error("WindowsInput: SendInput failed to send all events. Error: " + std::to_string(GetLastError()));
+        }
     }
 #else
-    // Log that input simulation is not implemented for non-Windows platforms
+     //should never get here, but just in case
     LocalTether::Utils::Logger::GetInstance().Warning("InputManager::simulateInput not implemented for this platform.");
 #endif
 }

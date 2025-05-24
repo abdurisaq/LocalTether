@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/software/polkit/policyconfig-1.0.dtd">
+<policyconfig>
+  <action id="com.localtether.runinputhelper">
+    <description>Run LocalTether Input Helper</description>
+    <message>Authentication is required to allow LocalTether to capture and simulate input events for remote control functionality.</message>
+    <icon_name>input-keyboard</icon_name> <!-- Or a more specific icon for your app -->
+    <defaults>
+      <!--
+        'auth_admin_keep': Ask for admin password once per session and keep authorization.
+        'auth_admin': Ask for admin password every time.
+        'yes': Allow without password (USE WITH EXTREME CAUTION, generally not recommended for this).
+      -->
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <!-- IMPORTANT: Replace /usr/local/bin/LocalTether with the *actual* installed path of your executable -->
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/bin/LocalTether</annotate>
+  </action>
+</policyconfig>

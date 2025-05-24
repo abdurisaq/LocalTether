@@ -1,6 +1,4 @@
 #include "utils/ScanNetwork.h"
-#include <cerrno>
-#include <cstring>
 
 
 std::filesystem::path findProjectRoot(const std::string& targetDirName, int maxDepth) {
@@ -125,11 +123,8 @@ std::vector<std::string> scanForServer(std::atomic<bool> & running) {
     std::vector<std::string> foundIps;
     std::string ipAddr = (findProjectRoot("LocalTether", 4) / "scripts" / "ipAddress.txt").string();
 
-    std::cout<<"file path for ip address : "<<ipAddr<<std::endl;
     FILE* file = fopen(ipAddr.c_str(), "r");
     if (file == NULL) {
-        std::string errorMsg = "failed to open file " + ipAddr + " error: " + strerror(errno) + " (errno: " + std::to_string(errno) + ")";
-        std::cout<<errorMsg<<std::endl;
         printf("Failed to open file\n");
         exit(1);
     }

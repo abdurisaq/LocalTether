@@ -43,9 +43,11 @@ struct HandshakePayload {
 struct InputPayload {
     std::vector<KeyEvent> keyEvents;  
     bool isMouseEvent = false;      
-    int16_t mouseX = 0;              
-    int16_t mouseY = 0;            
-    uint8_t mouseButtons = 0;        
+    int16_t deltaX = 0;              
+    int16_t deltaY = 0;            
+    uint8_t mouseButtons = 0;         //mouseY
+    int16_t scrollDeltaX = 0;
+    int16_t scrollDeltaY = 0;
 };
 
 struct ChatPayload {
@@ -65,6 +67,7 @@ struct FileDataPayload {
 
 struct CommandPayload {
     std::string command;
+    uint32_t clientId;
 };
 class Message {
 public:
