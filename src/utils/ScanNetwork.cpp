@@ -35,18 +35,18 @@ std::string getScriptPath() {
 
 #ifdef _WIN32
 void runScript(const std::string &scriptPath) {
-    // Build command line to run PowerShell with your script
+    
     std::string cmdLine = "pwsh -NoLogo -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + scriptPath + "\"";
 
     STARTUPINFOA si = { sizeof(si) };
     PROCESS_INFORMATION pi;
 
     si.dwFlags = STARTF_USESHOWWINDOW;
-    si.wShowWindow = SW_HIDE;  // Hide the window
+    si.wShowWindow = SW_HIDE; 
 
     BOOL success = CreateProcessA(
         NULL,
-        cmdLine.data(),  // must be modifiable string
+        cmdLine.data(),  
         NULL,
         NULL,
         FALSE,
@@ -62,7 +62,7 @@ void runScript(const std::string &scriptPath) {
         return;
     }
 
-    // Wait for process to finish
+   
     WaitForSingleObject(pi.hProcess, INFINITE);
 
     DWORD exitCode = 0;
@@ -89,7 +89,7 @@ void runScript(const std::string &scriptPath) {
         perror("execl failed");
         _exit(1);
     } else if (pid > 0) {
-        // Parent process: wait for child to finish
+       
         int status;
         waitpid(pid, &status, 0);
 

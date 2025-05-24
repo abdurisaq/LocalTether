@@ -12,10 +12,16 @@
 #include <openssl/ssl.h>
 
 #ifdef _WIN32
-#define _WIN32_WINNT 0x0601
+// Windows-specific 
+#define WIN32_LEAN_AND_MEAN  
+#define _WIN32_WINNT 0x0601  
+#include <windows.h>        
 #else
+// Linux-specific includes
 #include <polkit/polkit.h>
 #endif
+
+
 
 namespace LT = LocalTether;
 
@@ -25,7 +31,6 @@ int main(int argc, char** argv) {
         return -1;
     }
     
-    // Initialize libraries
     asio::io_context io_context;
     SSL_library_init();
 

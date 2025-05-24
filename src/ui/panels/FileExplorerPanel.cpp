@@ -1,21 +1,23 @@
 #include "ui/panels/FileExplorerPanel.h"
 
+
+//all these are empty, not implemented
 namespace LocalTether::UI::Panels {
     FileExplorerPanel::FileExplorerPanel() {
-        // Initialize with default values
+        
     }
     
     void FileExplorerPanel::Show(bool* p_open) {
         ImGui::Begin("File Explorer", p_open);
         
-        // Filter/search bar
+        
         ImGui::Text("Filter:");
         ImGui::SameLine();
         ImGui::InputText("##Filter", search_filter, IM_ARRAYSIZE(search_filter));
         
         ImGui::Separator();
         
-        // Draw tree and file list
+ 
         DrawFolderTree();
         
         ImGui::Separator();
@@ -26,16 +28,16 @@ namespace LocalTether::UI::Panels {
     }
     
     void FileExplorerPanel::SetRootDirectory(const std::string& path) {
-        // TODO: Set the root directory for file browsing
+        
     }
     
     std::string FileExplorerPanel::GetSelectedFilePath() const {
-        // TODO: Return the full path of the selected file
+        
         return "";
     }
     
     void FileExplorerPanel::DrawFolderTree() {
-        // Tree view for folders
+  
         if (ImGui::CollapsingHeader("Folders", &open_folders, ImGuiTreeNodeFlags_DefaultOpen))
         {
             if (ImGui::TreeNode("Documents"))
@@ -74,7 +76,7 @@ namespace LocalTether::UI::Panels {
     }
     
     void FileExplorerPanel::DrawFileList() {
-        // List view for files
+    
         ImGui::Text("Files:");
         
         ImGui::BeginChild("Files List", ImVec2(0, 0), true);

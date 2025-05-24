@@ -1,6 +1,13 @@
 #pragma once
-
+#include <asio.hpp>
 #include <mutex>
+#include <memory>  
+
+// Forward declarations
+namespace LocalTether::Network {
+    class Client;
+    class Server;
+}
 
 namespace LocalTether::UI {
     
@@ -13,12 +20,15 @@ namespace LocalTether::UI {
     extern std::mutex g_mutex;
 
     enum class AppMode {
-    None,
-    HostSetup,
-    JoinSetup,
-    Connecting,
-    ConnectedAsHost,
-    ConnectedAsClient
-};
+        None,
+        HostSetup,
+        JoinSetup,
+        Connecting,
+        ConnectedAsHost,
+        ConnectedAsClient
+    };
     extern AppMode app_mode;
+
+    LocalTether::Network::Client& getClient();
+    LocalTether::Network::Server& getServer();
 }

@@ -1,9 +1,11 @@
 #include <string>
 #include "ui/panels/PropertiesPanel.h"
 
+
+//unimplemented panel, just sfor now
 namespace LocalTether::UI::Panels {
     PropertiesPanel::PropertiesPanel() {
-        // Initialize with default values
+      
     }
     
     void PropertiesPanel::Show(bool* p_open) {
@@ -55,9 +57,8 @@ namespace LocalTether::UI::Panels {
     }
     
     void PropertiesPanel::SetFile(const std::string& filepath) {
-        // TODO: Load file properties
+    
         filename = filepath.substr(filepath.find_last_of("/\\") + 1);
-        
-        // In a real implementation, you would get actual file properties here
+
     }
 }

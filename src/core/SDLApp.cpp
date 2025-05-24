@@ -19,6 +19,7 @@ SDLApp::~SDLApp() {
 }
 
 bool SDLApp::Initialize() {
+    //logging to see which driver is used
     std::cout << "Available SDL video drivers:" << std::endl;
     for (int i = 0; i < SDL_GetNumVideoDrivers(); i++) {
         std::cout << " - " << SDL_GetVideoDriver(i) << std::endl;
@@ -39,7 +40,9 @@ bool SDLApp::Initialize() {
 
 
     std::cout << "Using video driver: " << SDL_GetCurrentVideoDriver() << std::endl;
-    // Request OpenGL 3.2 Core context
+
+
+    //3.2 version
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
@@ -47,7 +50,6 @@ bool SDLApp::Initialize() {
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
     SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
 
-    // Create window with maximized flag for desktop-like appearance
     window = SDL_CreateWindow(title.c_str(),
                               SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                               width, height,
@@ -72,9 +74,9 @@ bool SDLApp::Initialize() {
     }
 
     SDL_GL_MakeCurrent(window, gl_context);
-    SDL_GL_SetSwapInterval(1); // Enable vsync
+    SDL_GL_SetSwapInterval(1); 
 
-    // --- glad initialization ---
+
     if (!gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress)) {
         SDL_Log("Failed to initialize GLAD");
         std::cout<<"FAiled to initialize glad"<<std::endl;
@@ -84,28 +86,25 @@ bool SDLApp::Initialize() {
         return false;
     }
 
-    // --- ImGui initialization ---
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     io = &ImGui::GetIO();
     
-    // Set a nicer default font with proper size for DPI awareness
     #ifdef _WIN32
     io->Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\segoeui.ttf", 18.0f);
     #else
         io->Fonts->AddFontFromFileTTF("/usr/share/fonts/open-sans/OpenSans-Regular.ttf", 18.0f); //for now hardcoded, add to build system later donwloading font
     #endif
     
-    // Enable docking and viewports
+    // Enable docking 
     io->ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     io->ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
     io->ConfigViewportsNoAutoMerge = true;
     io->ConfigViewportsNoTaskBarIcon = false;
 
-    // Apply modern style
+
     UI::StyleManager::SetupModernStyle();
 
-    // Setup platform/renderer backends
     ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
     ImGui_ImplOpenGL3_Init("#version 150");
 
@@ -120,13 +119,12 @@ void SDLApp::Run() {
             return;
         }
     }
-    
-    // Main application loop
+
     while (running) {
         ProcessEvents();
         StartFrame();
         
-        // Call user-defined render function
+
         if (renderCallback) {
             renderCallback();
         }
@@ -167,7 +165,6 @@ void SDLApp::Render() {
 
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
-    // Update and Render additional Platform Windows
     if (io->ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
         SDL_Window* backup_current_window = SDL_GL_GetCurrentWindow();
         SDL_GLContext backup_current_context = SDL_GL_GetCurrentContext();
@@ -197,4 +194,4 @@ void SDLApp::Cleanup() {
     SDL_Quit();
 }
 
-} // namespace LocalTether::Core
+}

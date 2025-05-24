@@ -2,9 +2,10 @@
 #include "utils/Logger.h"
 #include <cstring>
 
+//unimplemented
 namespace LocalTether::UI::Panels {
     NetworkSettingsPanel::NetworkSettingsPanel() {
-        // Initialize with default values
+       
     }
     
     void NetworkSettingsPanel::Show(bool* p_open) {
@@ -19,7 +20,7 @@ namespace LocalTether::UI::Panels {
         
         ImGui::Separator();
         
-        // Add more network settings
+
         ImGui::Combo("Protocol", &protocol, protocols, IM_ARRAYSIZE(protocols));
         
         ImGui::InputText("Username", username, IM_ARRAYSIZE(username));
@@ -47,7 +48,7 @@ namespace LocalTether::UI::Panels {
     }
     
     bool NetworkSettingsPanel::Connect() {
-        // TODO: Implement actual connection logic
+     
         return true;
     }
     

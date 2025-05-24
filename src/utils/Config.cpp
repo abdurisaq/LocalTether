@@ -2,6 +2,7 @@
 #include <fstream>
 #include <iostream>
 
+//unimplemented configs
 namespace LocalTether::Utils {
     
     Config& Config::GetInstance() {
@@ -10,16 +11,16 @@ namespace LocalTether::Utils {
     }
     
     Config::Config() {
-        // Initialize with default configuration values
+      
     }
     
     bool Config::LoadFromFile(const std::string& filepath) {
-        // TODO: Implement JSON loading
+       
         return false;
     }
     
     bool Config::SaveToFile(const std::string& filepath) {
-        // TODO: Implement JSON saving
+   
         return false;
     }
     
