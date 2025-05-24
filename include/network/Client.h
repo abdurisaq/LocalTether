@@ -9,6 +9,7 @@
 #include <mutex>
 #include <atomic>
 #include <thread>
+#include "input/InputManager.h"
 
 namespace LocalTether::Network {
 
@@ -38,6 +39,7 @@ public:
     
     // Send messages
     void sendInput(const std::vector<uint8_t>& inputData);
+    void sendInput(const InputPayload& payload);
     void sendChat(const std::string& text);
     void sendCommand(const std::string& command);
     void requestFile(const std::string& filename);
@@ -68,6 +70,15 @@ private:
     void performHandshake();
 
     void setState(ClientState newState, const std::error_code& error = std::error_code());
+
+
+    std::unique_ptr<LocalTether::Input::InputManager> inputManager_;
+    std::thread inputThread_;
+    std::atomic<bool> loggingInput_{false};
+
+    void inputLoop(); 
+    void startInputLogging();
+    void stopInputLogging();
     
     // Member variables
     asio::io_context& io_context_;

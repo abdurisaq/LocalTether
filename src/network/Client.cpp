@@ -1,6 +1,15 @@
 #include "network/Client.h"
 #include "network/Message.h"
 #include "utils/Logger.h"
+#include "input/InputManager.h"
+
+#ifdef _WIN32
+#include "input/WindowsInput.h"
+#include <windows.h>
+#else
+#include "input/LinuxInput.h"
+#endif
+
 
 namespace LocalTether::Network {
 
@@ -52,7 +61,7 @@ void Client::disconnect() {
     if (state_ == ClientState::Disconnected) {
         return;
     }
-    
+    stopInputLogging();
     try {
         if (socket_.is_open()) {
             
@@ -102,6 +111,75 @@ void Client::sendInput(const std::vector<uint8_t>& inputData) {
         }
     });
 }
+
+void Client::sendInput(const InputPayload& payload) {
+    if (state_ != ClientState::Connected) {
+        return;
+    }
+    auto msg = Message::createInput(payload, clientId_);
+    auto data = msg.serialize();
+    
+    asio::post(io_context_, [this, data = std::move(data)]() {
+        bool shouldStartWrite = writeQueue_.empty() && !writing_;
+        {
+            std::lock_guard<std::mutex> lock(writeMutex_);
+            writeQueue_.push(std::move(data));
+        }
+        if (shouldStartWrite) {
+            doWrite();
+        }
+    });
+}
+
+void Client::startInputLogging() {
+    if (loggingInput_) {
+        return;
+    }
+    LocalTether::Utils::Logger::GetInstance().Info("Attempting to start input logging...");
+    inputManager_ = LocalTether::Input::createInputManager();
+
+    if (inputManager_ && inputManager_->start()) {
+        loggingInput_ = true;
+        inputThread_ = std::thread(&Client::inputLoop, this);
+        LocalTether::Utils::Logger::GetInstance().Info("Input logging thread started.");
+    } else {
+        LocalTether::Utils::Logger::GetInstance().Error("Failed to start InputManager.");
+    }
+}
+
+
+void Client::inputLoop() {
+    LocalTether::Utils::Logger::GetInstance().Info("Input loop running...");
+    while (loggingInput_ && inputManager_) {
+        auto payloads = inputManager_->pollEvents();
+        for (const auto& payload : payloads) {
+            if (state_ == ClientState::Connected) {
+                LocalTether::Utils::Logger::GetInstance().Info("Sending input...");
+                 sendInput(payload);
+            }
+        }
+        
+        std::this_thread::sleep_for(std::chrono::milliseconds(10)); //hardcoded 10 for now
+    }
+    LocalTether::Utils::Logger::GetInstance().Info("Input loop exited.");
+}
+void Client::stopInputLogging() {
+    if (!loggingInput_) {
+        return;
+    }
+    loggingInput_ = false;
+    if (inputManager_) {
+        inputManager_->stop();
+    }
+    if (inputThread_.joinable()) {
+        inputThread_.join();
+        LocalTether::Utils::Logger::GetInstance().Info("Input logging thread stopped.");
+    }
+    inputManager_.reset();
+}
+
+
+
 
 void Client::sendChat(const std::string& text) {
     if (state_ != ClientState::Connected) {
@@ -294,7 +372,16 @@ void Client::handleMessage(const Message& message) {
             
     
             clientId_ = message.getClientId();
-            
+            if (role_ == ClientRole::Host && connectHandler_) { 
+                 LocalTether::Utils::Logger::GetInstance().Info("Client is Host, starting input logging.");
+                 startInputLogging();
+            }
+            if (role_ != ClientRole::Host && !inputManager_) { 
+            inputManager_ = LocalTether::Input::createInputManager();
+            if (!inputManager_) {
+                LocalTether::Utils::Logger::GetInstance().Error("Failed to create InputManager for simulation on receiver client.");
+            }
+        }
             if (connectHandler_) {
                 connectHandler_();
             }
@@ -302,7 +389,20 @@ void Client::handleMessage(const Message& message) {
         return;
     }
     
-    if (messageHandler_ && state_ == ClientState::Connected) {
+    if (message.getType() == MessageType::Input && role_ != ClientRole::Host) {
+        if (inputManager_) { 
+            try {
+                InputPayload receivedPayload = message.getInputPayload();
+                inputManager_->simulateInput(receivedPayload); 
+            } catch (const std::exception& e) {
+                LocalTether::Utils::Logger::GetInstance().Error(
+                    "Failed to process received input: " + std::string(e.what()));
+            }
+        } else {
+            LocalTether::Utils::Logger::GetInstance().Warning(
+                "Received input message on receiver client, but no InputManager available to simulate.");
+        }
+    } else if (messageHandler_) {
         messageHandler_(message);
     }
 }
@@ -375,4 +475,8 @@ void Client::setErrorHandler(ErrorHandler handler) {
     errorHandler_ = std::move(handler);
 }
 
+
 } 
+
+
+

@@ -3,6 +3,7 @@
 #include <vector>
 #include <memory>
 #include <mutex>
+#include <fstream>
 
 namespace LocalTether::Utils {
     enum class LogLevel {
@@ -31,7 +32,7 @@ namespace LocalTether::Utils {
         
     private:
         Logger();
-        ~Logger() = default;
+        ~Logger();
         
         
         Logger(const Logger&) = delete;
@@ -39,7 +40,7 @@ namespace LocalTether::Utils {
         
         std::vector<std::string> logs;
         std::mutex mutex;
-        
+        std::ofstream logFile;
         
         std::string FormatMessage(const std::string& message, LogLevel level);
         

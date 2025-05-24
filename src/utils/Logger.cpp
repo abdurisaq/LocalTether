@@ -12,9 +12,18 @@ namespace LocalTether::Utils {
     }
     
     Logger::Logger() {
-        // Initialize logger
+         logFile.open("application.log", std::ios::out | std::ios::app); // Open in append mode
+        if (!logFile.is_open()) {
+            std::cerr << "CRITICAL: Failed to open log file: application.log" << std::endl;
+        }
+        Log("Logger initialized. Logging to application.log", LogLevel::Info);
     }
     
+    Logger::~Logger() {
+        if (logFile.is_open()) {
+            logFile.close();
+        }
+    }
     void Logger::Log(const std::string& message, LogLevel level) {
         std::lock_guard<std::mutex> lock(mutex);
         std::string formatted = FormatMessage(message, level);
@@ -22,6 +31,9 @@ namespace LocalTether::Utils {
         
         // Also output to console for debugging
         std::cout << formatted << std::endl;
+        if (logFile.is_open()) {
+            logFile << formatted << std::endl;
+        }
     }
     
     void Logger::Debug(const std::string& message) {

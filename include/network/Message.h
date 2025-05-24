@@ -28,10 +28,49 @@ struct MessageHeader {
     uint32_t clientId;
 };
 
+
+struct KeyEvent {
+    uint8_t keyCode;    
+    bool isPressed;     
+};
+
+struct HandshakePayload {
+    ClientRole role;
+    std::string clientName;
+    std::string password;
+};
+
+struct InputPayload {
+    std::vector<KeyEvent> keyEvents;  
+    bool isMouseEvent = false;      
+    int16_t mouseX = 0;              
+    int16_t mouseY = 0;            
+    uint8_t mouseButtons = 0;        
+};
+
+struct ChatPayload {
+    std::string text;
+};
+
+struct FileRequestPayload {
+    std::string filename;
+};
+
+struct FileDataPayload {
+    std::string filename;
+    std::vector<uint8_t> chunkData;
+    uint32_t chunkId;
+    uint32_t totalChunks;
+};
+
+struct CommandPayload {
+    std::string command;
+};
 class Message {
 public:
     
     static Message createInput(const std::vector<uint8_t>& inputData, uint32_t clientId);
+    static Message createInput(const InputPayload& inputPayload, uint32_t clientId);
     static Message createChat(const std::string& text, uint32_t clientId);
     static Message createFileRequest(const std::string& filename, uint32_t clientId);
     static Message createFileData(const std::string& filename, const std::vector<uint8_t>& chunk, 
@@ -40,6 +79,13 @@ public:
     static Message createHandshake(ClientRole role, const std::string& clientName, 
                                 const std::string& password, uint32_t clientId = 0);
     
+
+    HandshakePayload getHandshakePayload() const;
+    InputPayload getInputPayload() const;
+    ChatPayload getChatPayload() const;
+    FileRequestPayload getFileRequestPayload() const;
+    FileDataPayload getFileDataPayload() const;
+    CommandPayload getCommandPayload() const;
     
     std::vector<uint8_t> serialize() const;
     
@@ -54,7 +100,6 @@ public:
     
 
     std::string getTextPayload() const;
-    
 private:
     Message(MessageType type, uint32_t clientId, const std::vector<uint8_t>& payload);
     

@@ -44,12 +44,9 @@ int main(int argc, char** argv) {
     LT::UI::Panels::FileExplorerPanel fileExplorerPanel;
     LT::UI::Panels::NetworkSettingsPanel networkSettingsPanel;
     LT::UI::Panels::PropertiesPanel propertiesPanel;
+
     
-    
-    consolePanel.AddLogMessage("Application started");
-    consolePanel.AddLogMessage("Initialized ImGui with docking support");
-    consolePanel.AddLogMessage("Default layout created");
-    
+    LocalTether::Utils::Logger::GetInstance().Info("--- Application Main Started ---");
 
     LT::UI::app_mode = LT::UI::AppMode::None;
     app.SetRenderCallback([&]() {

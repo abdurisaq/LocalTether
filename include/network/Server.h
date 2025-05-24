@@ -81,7 +81,7 @@ private:
     std::vector<std::shared_ptr<Session>> sessions_;
     std::mutex sessions_mutex_;
     uint32_t nextClientId_ = 1; 
-    
+    uint32_t hostClientId_ = 0;
 
     std::atomic<ServerState> state_{ServerState::Stopped};
     std::string lastError_;

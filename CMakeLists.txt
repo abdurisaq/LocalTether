@@ -56,6 +56,7 @@ file(GLOB_RECURSE UI_SOURCES "src/ui/*.cpp")
 file(GLOB_RECURSE UI_PANEL_SOURCES "src/ui/panels/*.cpp")
 file(GLOB_RECURSE UTILS_SOURCES "src/utils/*.cpp")
 file(GLOB_RECURSE NETWORK_SOURCES "src/network/*.cpp")
+file(GLOB_RECURSE INPUT_SOURCE "src/input/*.cpp")
 
 # Combine all sources
 set(SOURCES
@@ -65,6 +66,7 @@ set(SOURCES
     ${UI_PANEL_SOURCES}
     ${UTILS_SOURCES}
     ${NETWORK_SOURCES}
+    ${INPUT_SOURCE}
 )
 
 # Create executable
