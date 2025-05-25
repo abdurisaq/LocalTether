@@ -2,6 +2,6 @@
 
 #ifndef _WIN32
 namespace LocalTether::Input {
-    int runInputHelperMode();
+    int runInputHelperMode(int argc, char ** argv);
 }
 #endif

@@ -63,6 +63,7 @@ bool setup_shared_memory() {
     shm_unlink(SHM_NAME); // Clean up previous instance, if any
 
     g_shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
+    fchmod(g_shm_fd,0666);
     if (g_shm_fd == -1) {
         LT::Utils::Logger::GetInstance().Error("Input Helper: shm_open failed: " + std::string(strerror(errno)));
         return false;
@@ -317,7 +318,15 @@ void handle_ipc_command(const char* data, size_t length) {
 }
 
 
-int runInputHelperMode() {
+int runInputHelperMode(int argc, char ** argv) {
+    if(argc < 4){
+        LT::Utils::Logger::GetInstance().Error("Input Helper: insufficient arguements");
+        return 1;
+    }
+    uid_t user_uid = static_cast<uid_t>(atoi(argv[2]));
+    const char * username = argv[3];
+
+    std::cout<<"now running input helper"<<std::endl;
     LT::Utils::Logger::GetInstance().Info("--- Input Helper Mode Started (PID: " + std::to_string(getpid()) + ") ---");
 
     if (!setup_shared_memory()) { // Setup shared memory first
@@ -335,12 +344,7 @@ int runInputHelperMode() {
         return 1;
     }
     
-    // Generate a unique socket path, e.g., in /tmp
-    // The user running pkexec is root, but SUDO_USER might give the original user
-    const char* original_user = getenv("SUDO_USER");
-    if (!original_user) original_user = getenv("USER");
-    if (!original_user) original_user = "unknown";
-    G_ACTUAL_SOCKET_PATH = "/tmp/localtether_helper_socket_" + std::string(original_user) + "_" + std::to_string(getpid());
+    G_ACTUAL_SOCKET_PATH = "/tmp/localtether_helper_socket_" + std::string(username) +"_" + std::to_string(user_uid) +  "_" + std::to_string(getpid());
 
 
     asio::io_context io_context;
@@ -353,6 +357,13 @@ int runInputHelperMode() {
     try {
         std::filesystem::remove(G_ACTUAL_SOCKET_PATH); // Clean up old socket if any
         asio::local::stream_protocol::acceptor acceptor(io_context, asio::local::stream_protocol::endpoint(G_ACTUAL_SOCKET_PATH));
+        if(chown(G_ACTUAL_SOCKET_PATH.c_str(), user_uid, -1) == -1){
+
+            LT::Utils::Logger::GetInstance().Error("INput helper: failed to change ownership: " + std::string(strerror(errno)));
+        }else{
+            LT::Utils::Logger::GetInstance().Info("Input helper: successfully changed owner ship to " +std::to_string(user_uid));
+        }
+
         chmod(G_ACTUAL_SOCKET_PATH.c_str(), 0777); // Make socket accessible
 
         LT::Utils::Logger::GetInstance().Info("Input Helper: Listening on " + G_ACTUAL_SOCKET_PATH);

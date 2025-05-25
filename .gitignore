@@ -3,3 +3,6 @@ external/
 build/
 .cache/
 compile_commands.json
+core*
+ipAddress*
+application.log

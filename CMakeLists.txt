@@ -3,6 +3,7 @@ project(LocalTether)
 
 set(CMAKE_CXX_STANDARD 17)
 set(BUILD_SHARED_LIBS OFF)
+set(CMAKE_BUILD_TYPE Debug)
 
 # ImGui and platform-specific definitions
 add_definitions(-DIMGUI_DEFINE_MATH_OPERATORS)

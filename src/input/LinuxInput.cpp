@@ -15,6 +15,7 @@
 #include <fcntl.h>      // For O_RDONLY, O_RDWR
 #include <sys/mman.h>   // For mmap, shm_open
 #include <sys/stat.h>   // For mode constants
+#include <pwd.h>
 
 #ifndef PATH_MAX
 #include <limits.h>
@@ -133,24 +134,25 @@ bool LinuxInput::launchHelperProcess() {
         LT::Utils::Logger::GetInstance().Error("LinuxInput: Cannot launch input helper: executable path unknown.");
         return false;
     }
+    uid_t uid = getuid();
+    struct passwd * pw = getpwuid(uid);
+    const char * username = pw ? pw->pw_name : "Unknown";
+    std::string uid_str = std::to_string(uid);
+    std::string effective_uid = std::to_string(geteuid());
     
-    // Clean up any old socket file that might exist at a predictable path if we are about to launch.
-    // This is less critical now as the path is dynamic and communicated via SHM.
-    // std::filesystem::remove(actual_helper_socket_path_); // actual_helper_socket_path_ is not known yet
-
-    std::string command_str_log = "pkexec " + exePath + " --input-helper-mode";
+    std::string command_str_log = "pkexec " + exePath + " --input-helper-mode"+ " " + uid_str + " " + username +" effective uid: " + effective_uid;
     LT::Utils::Logger::GetInstance().Info("LinuxInput: Attempting to launch helper: " + command_str_log);
 
     pkexec_pid_ = fork();
     if (pkexec_pid_ == 0) { 
         prctl(PR_SET_PDEATHSIG, SIGHUP);
-        int dev_null_fd = open("/dev/null", O_WRONLY);
-        if (dev_null_fd != -1) {
-            dup2(dev_null_fd, STDOUT_FILENO);
-            dup2(dev_null_fd, STDERR_FILENO);
-            close(dev_null_fd);
+        int logLocation = open("/tmp/helper.log", O_WRONLY | O_CREAT | O_TRUNC, 0666);
+        if (logLocation != -1) {
+            dup2(logLocation, STDOUT_FILENO);
+            dup2(logLocation, STDERR_FILENO);
+            close(logLocation);
         }
-        execlp("pkexec", "pkexec", exePath.c_str(), "--input-helper-mode", (char*)nullptr);
+        execlp("pkexec", "pkexec", exePath.c_str(), "--input-helper-mode",uid_str.c_str(), username, (char*)nullptr);
         perror("LinuxInput: execlp pkexec failed"); 
         _exit(127); 
     } else if (pkexec_pid_ < 0) {
@@ -172,14 +174,14 @@ bool LinuxInput::launchHelperProcess() {
 
 bool LinuxInput::connectToHelper() {
     LT::Utils::Logger::GetInstance().Info("LinuxInput: Attempting to connect to input helper.");
-    int connect_retries = 20; // Increased retries for SHM readiness
+    int connect_retries = 40; // Increased retries for SHM readiness
     bool shm_info_read = false;
 
     while (connect_retries-- > 0) {
         if (!shm_info_read) {
             if (!open_and_map_shared_memory()) {
                  LT::Utils::Logger::GetInstance().Debug("LinuxInput: SHM not available yet. Retrying... (attempts left: " + std::to_string(connect_retries) + ")");
-                 std::this_thread::sleep_for(std::chrono::milliseconds(250));
+                 std::this_thread::sleep_for(std::chrono::milliseconds(500));
                  continue;
             }
             if (read_info_from_shared_memory(helper_actual_pid_, actual_helper_socket_path_)) {

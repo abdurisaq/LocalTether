@@ -32,7 +32,7 @@ int main(int argc, char** argv) {
     if (argc > 1 && std::string(argv[1]) == "--input-helper-mode") {
         
         LocalTether::Utils::Logger::GetInstance().Log("Input helper mode starting", LocalTether::Utils::LogLevel::Info);
-        return LocalTether::Input::runInputHelperMode(); 
+        return LocalTether::Input::runInputHelperMode(argc, argv); 
     }
     #endif
 
