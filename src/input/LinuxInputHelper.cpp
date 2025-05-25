@@ -51,6 +51,11 @@ static std::vector<int> g_evdev_fds;
 static struct libevdev_uinput* g_uinput_device = nullptr;
 static std::atomic<bool> g_input_stream_paused(false);
 
+
+static int32_t last_abs_x = 0, last_abs_y = 0;//-1
+static int32_t last_scroll_x = 0, last_scroll_y = 0;
+const int DEADZONE = 5;
+
 void helper_signal_handler(int signum) {
     LT::Utils::Logger::GetInstance().Info("Input Helper: Received signal " + std::to_string(signum) + ". Shutting down.");
     g_helper_running = false;
@@ -174,42 +179,79 @@ bool initialize_input_devices() {
         if (!dev_udev) continue;
 
         const char *devnode = udev_device_get_devnode(dev_udev);
-        if (devnode && strncmp(devnode, "/dev/input/event", 16) == 0) {
-            const char* prop_kbd = udev_device_get_property_value(dev_udev, "ID_INPUT_KEYBOARD");
-            const char* prop_mouse = udev_device_get_property_value(dev_udev, "ID_INPUT_MOUSE");
+        if (!devnode || strncmp(devnode, "/dev/input/event", 16) != 0) {
+            udev_device_unref(dev_udev);
+            continue;
 
-            bool is_potential_device = false;
-            if (prop_kbd && strcmp(prop_kbd, "1") == 0) {
+        }
+        
+        const char * name = udev_device_get_sysname(dev_udev);
+        const char * product = udev_device_get_property_value(dev_udev,"NAME");
+
+        LT::Utils::Logger::GetInstance().Info(
+            std::string("Input Helper: Found device: ")+
+            (name ? name : "unknown") +
+            ", devnode: " + devnode +
+            ", NAME: " + (product? product : "unknown")
+        );
+
+        const char * props[] = {
+            udev_device_get_property_value(dev_udev, "ID_INPUT_KEYBOARD"),
+            udev_device_get_property_value(dev_udev, "ID_INPUT_MOUSE"),
+            udev_device_get_property_value(dev_udev, "ID_INPUT_TOUCHPAD"),
+            udev_device_get_property_value(dev_udev, "ID_INPUT_TABLET"),
+            udev_device_get_property_value(dev_udev, "ID_INPUT_POINTINGSTICK")
+        };
+
+        bool is_potential_device = false;
+
+        for( const char * prop : props){
+            if (prop && strcmp(prop, "1") == 0) {
                 is_potential_device = true;
+                break;
             }
-            if (prop_mouse && strcmp(prop_mouse, "1") == 0) {
-                is_potential_device = true;
-            }
+        }
+        if(!is_potential_device){
+            udev_device_unref(dev_udev);
+            continue;
+        }
 
-            if(is_potential_device) {
-                int fd = open(devnode, O_RDONLY | O_NONBLOCK);
-                if (fd < 0) {
-                    udev_device_unref(dev_udev);
-                    continue;
-                }
+        int fd = open(devnode,O_RDONLY | O_NONBLOCK);
 
-                struct libevdev *ev_dev = libevdev_new();
-                if (libevdev_set_fd(ev_dev, fd) < 0) {
-                    libevdev_free(ev_dev);
-                    close(fd);
-                    udev_device_unref(dev_udev);
-                    continue;
-                }
-                
-                if ((libevdev_has_event_type(ev_dev, EV_KEY) && libevdev_has_event_code(ev_dev, EV_KEY, KEY_A)) ||
-                    (libevdev_has_event_type(ev_dev, EV_REL) && libevdev_has_event_code(ev_dev, EV_REL, REL_X))) {
-                    g_evdev_devices.push_back(ev_dev);
-                    g_evdev_fds.push_back(fd);
-                } else {
-                    libevdev_free(ev_dev);
-                    close(fd);
-                }
+        if (fd < 0) {
+            udev_device_unref(dev_udev);
+            continue;
+        }
+
+        struct libevdev *ev_dev = libevdev_new();
+        if (libevdev_set_fd(ev_dev, fd) < 0) {
+            libevdev_free(ev_dev);
+            close(fd);
+            udev_device_unref(dev_udev);
+            continue;
+        }
+        bool hasUsefulInput = false;
+        if(libevdev_has_event_type(ev_dev,EV_KEY)){
+           hasUsefulInput = true; 
+
+        }
+        if(libevdev_has_event_type(ev_dev,EV_REL)){
+            if(libevdev_has_event_code(ev_dev,EV_REL,REL_X) || libevdev_has_event_code(ev_dev,EV_REL, REL_Y)){
+                hasUsefulInput = true;
             }
+        }
+        if(libevdev_has_event_type(ev_dev,EV_ABS)){
+            if(libevdev_has_event_code(ev_dev,EV_ABS,ABS_X) || libevdev_has_event_code(ev_dev,EV_ABS,ABS_Y) ||
+                libevdev_has_event_code(ev_dev,EV_ABS,ABS_MT_POSITION_X) ||libevdev_has_event_code(ev_dev,EV_ABS,ABS_MT_POSITION_Y)){
+                hasUsefulInput = true;
+            }
+        }
+        if(hasUsefulInput){ 
+            g_evdev_devices.push_back(ev_dev);
+            g_evdev_fds.push_back(fd);
+        } else {
+            libevdev_free(ev_dev);
+            close(fd);
         }
         udev_device_unref(dev_udev);
     }
@@ -224,6 +266,7 @@ bool initialize_input_devices() {
     libevdev_set_name(uinput_base_dev, "LocalTether Virtual Input Device");
     libevdev_enable_event_type(uinput_base_dev, EV_KEY);
     libevdev_enable_event_type(uinput_base_dev, EV_REL);
+    libevdev_enable_event_type(uinput_base_dev, EV_ABS);
     libevdev_enable_event_type(uinput_base_dev, EV_SYN);
     for (unsigned int key_code = 0; key_code < KEY_MAX; ++key_code) {
         libevdev_enable_event_code(uinput_base_dev, EV_KEY, key_code, nullptr);
@@ -232,6 +275,13 @@ bool initialize_input_devices() {
     libevdev_enable_event_code(uinput_base_dev, EV_REL, REL_Y, nullptr);
     libevdev_enable_event_code(uinput_base_dev, EV_REL, REL_WHEEL, nullptr);
     libevdev_enable_event_code(uinput_base_dev, EV_REL, REL_HWHEEL, nullptr);
+
+    libevdev_enable_event_code(uinput_base_dev, EV_ABS, ABS_X, nullptr);
+    libevdev_enable_event_code(uinput_base_dev, EV_ABS, ABS_Y, nullptr);
+    libevdev_enable_event_code(uinput_base_dev, EV_ABS, ABS_MT_POSITION_X, nullptr);
+    libevdev_enable_event_code(uinput_base_dev, EV_ABS, ABS_MT_POSITION_Y, nullptr);
+
+
     libevdev_enable_event_code(uinput_base_dev, EV_KEY, BTN_LEFT, nullptr);
     libevdev_enable_event_code(uinput_base_dev, EV_KEY, BTN_RIGHT, nullptr);
     libevdev_enable_event_code(uinput_base_dev, EV_KEY, BTN_MIDDLE, nullptr);
@@ -245,6 +295,54 @@ bool initialize_input_devices() {
         g_uinput_device = nullptr;
     }
     return true;
+}
+std::vector<uint8_t> serializeInputPayload(const LocalTether::Network::InputPayload& payload) {
+    std::vector<uint8_t> buffer;
+
+    //its gonna equal 10 bytes, but just to make modular and easy later
+    size_t fixedSize = sizeof(payload.isMouseEvent) +
+                       sizeof(payload.deltaX) +
+                       sizeof(payload.deltaY) +
+                       sizeof(payload.mouseButtons) +
+                       sizeof(payload.scrollDeltaX) +
+                       sizeof(payload.scrollDeltaY);
+
+    size_t keyEventsCountSize = sizeof(uint32_t);
+    size_t keyEventsDataSize = payload.keyEvents.size() * sizeof(LocalTether::Network::KeyEvent);
+
+    buffer.resize(fixedSize + keyEventsCountSize + keyEventsDataSize);
+
+    size_t offset = 0;
+
+    memcpy(buffer.data() + offset, &payload.isMouseEvent, sizeof(payload.isMouseEvent));
+    offset += sizeof(payload.isMouseEvent);
+
+    memcpy(buffer.data() + offset, &payload.deltaX, sizeof(payload.deltaX));
+    offset += sizeof(payload.deltaX);
+
+    memcpy(buffer.data() + offset, &payload.deltaY, sizeof(payload.deltaY));
+    offset += sizeof(payload.deltaY);
+
+    memcpy(buffer.data() + offset, &payload.mouseButtons, sizeof(payload.mouseButtons));
+    offset += sizeof(payload.mouseButtons);
+
+    memcpy(buffer.data() + offset, &payload.scrollDeltaX, sizeof(payload.scrollDeltaX));
+    offset += sizeof(payload.scrollDeltaX);
+
+    memcpy(buffer.data() + offset, &payload.scrollDeltaY, sizeof(payload.scrollDeltaY));
+    offset += sizeof(payload.scrollDeltaY);
+
+    //serializing key counts so no sending vectors over the network
+    uint32_t keyEventsCount = static_cast<uint32_t>(payload.keyEvents.size());
+    memcpy(buffer.data() + offset, &keyEventsCount, sizeof(keyEventsCount));
+    offset += sizeof(keyEventsCount);
+
+    if (keyEventsCount > 0) {
+        memcpy(buffer.data() + offset, payload.keyEvents.data(), keyEventsDataSize);
+        offset += keyEventsDataSize;
+    }
+
+    return buffer;
 }
 
 void poll_and_send_input_events(asio::local::stream_protocol::socket& client_socket) {
@@ -271,16 +369,61 @@ void poll_and_send_input_events(asio::local::stream_protocol::socket& client_soc
                     uint8_t vk_code = LT::Utils::KeycodeConverter::evdevToVk(ev.code);
                     if (vk_code != 0) { current_payload.keyEvents.push_back({vk_code, (ev.value == 1 || ev.value == 2)}); events_accumulated = true; }
                 } else if (ev.type == EV_REL) {
+                    printf("Mouse move: code : %d, value = %d\n",ev.code,ev.value);
                     current_payload.isMouseEvent = true;
                     if (ev.code == REL_X) current_payload.deltaX += static_cast<int16_t>(ev.value);
                     else if (ev.code == REL_Y) current_payload.deltaY += static_cast<int16_t>(ev.value);
                     else if (ev.code == REL_WHEEL) current_payload.scrollDeltaY += static_cast<int16_t>(ev.value);
                     else if (ev.code == REL_HWHEEL) current_payload.scrollDeltaX += static_cast<int16_t>(ev.value);
                     events_accumulated = true;
-                } else if (ev.type == EV_SYN && ev.code == SYN_REPORT) {
+                } 
+                else if(ev.type == EV_ABS){
+                    if(ev.code == ABS_X || ev.code == ABS_MT_POSITION_X){
+                        if(last_abs_x >=0){
+                            int dx = ev.value - last_abs_x;
+                            if(std::abs(dx) >= DEADZONE){
+                                current_payload.deltaX += dx;
+                                events_accumulated = true;
+                                last_abs_x =ev.value;
+                            }
+
+                        }
+
+                    }else if (ev.code == ABS_Y || ev.code || ABS_MT_POSITION_Y){
+                        if(last_abs_y >=0){
+                            int dy = ev.value - last_abs_y;
+                            if(std::abs(dy) >= DEADZONE){
+                                current_payload.deltaY += dy;
+                                events_accumulated = true;
+                                last_abs_y =ev.value;
+                            }
+
+                        }
+
+                    }else if (ev.code == ABS_WHEEL){
+                        int dy = ev.value - last_scroll_y;
+                        if(std::abs(dy) >= DEADZONE){
+                            current_payload.scrollDeltaY += dy;
+                            events_accumulated = true;
+                            last_scroll_y =ev.value;
+                        }
+
+
+
+                    }else if (ev.code == ABS_THROTTLE){
+                        int dx = ev.value - last_scroll_x;
+                        if(std::abs(dx) >= DEADZONE){
+                            current_payload.scrollDeltaX += dx;
+                            events_accumulated = true;
+                            last_scroll_x =ev.value;
+                        }
+                    }
+
+                }
+                else if (ev.type == EV_SYN && ev.code == SYN_REPORT) {
                     if (events_accumulated) {
-                        std::vector<uint8_t> buffer(sizeof(LT::Network::InputPayload));
-                        memcpy(buffer.data(), &current_payload, sizeof(LT::Network::InputPayload));
+                        current_payload.isMouseEvent = true;
+                        std::vector<uint8_t> buffer = serializeInputPayload(current_payload);
                         asio::error_code ec_write;
                         asio::write(client_socket, asio::buffer(buffer), ec_write);
                         if (ec_write) { g_helper_running = false; return; }

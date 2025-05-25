@@ -16,6 +16,7 @@
 #include <sys/mman.h>   // For mmap, shm_open
 #include <sys/stat.h>   // For mode constants
 #include <pwd.h>
+#include <optional>
 
 #ifndef PATH_MAX
 #include <limits.h>
@@ -328,22 +329,86 @@ void LinuxInput::stop() {
     LT::Utils::Logger::GetInstance().Info("LinuxInput: Stopped.");
 }
 
+std::optional<Network::InputPayload> deserializeInputPayload(const uint8_t* data, size_t length) {
+    Network::InputPayload payload;
+
+    size_t offset = 0;
+
+    // Minimum size is fixed fields + keyEventsCount (even if zero key events)
+    const size_t minSize = sizeof(payload.isMouseEvent) +
+                           sizeof(payload.deltaX) +
+                           sizeof(payload.deltaY) +
+                           sizeof(payload.mouseButtons) +
+                           sizeof(payload.scrollDeltaX) +
+                           sizeof(payload.scrollDeltaY) +
+                           sizeof(uint32_t); // keyEvents count
+
+    if (length < minSize) {
+        return std::nullopt; // Buffer too small
+    }
+
+    // Deserialize fixed fields
+    memcpy(&payload.isMouseEvent, data + offset, sizeof(payload.isMouseEvent));
+    offset += sizeof(payload.isMouseEvent);
+
+    memcpy(&payload.deltaX, data + offset, sizeof(payload.deltaX));
+    offset += sizeof(payload.deltaX);
+
+    memcpy(&payload.deltaY, data + offset, sizeof(payload.deltaY));
+    offset += sizeof(payload.deltaY);
+
+    memcpy(&payload.mouseButtons, data + offset, sizeof(payload.mouseButtons));
+    offset += sizeof(payload.mouseButtons);
+
+    memcpy(&payload.scrollDeltaX, data + offset, sizeof(payload.scrollDeltaX));
+    offset += sizeof(payload.scrollDeltaX);
+
+    memcpy(&payload.scrollDeltaY, data + offset, sizeof(payload.scrollDeltaY));
+    offset += sizeof(payload.scrollDeltaY);
+
+    // Deserialize keyEvents count
+    uint32_t keyEventsCount = 0;
+    memcpy(&keyEventsCount, data + offset, sizeof(keyEventsCount));
+    offset += sizeof(keyEventsCount);
+
+    // Check if buffer is large enough for key events
+    size_t requiredSize = offset + keyEventsCount * sizeof(Network::KeyEvent);
+    if (length < requiredSize) {
+        return std::nullopt; // Buffer too small for keyEvents
+    }
+
+    // Deserialize keyEvents
+    payload.keyEvents.resize(keyEventsCount);
+    if (keyEventsCount > 0) {
+        memcpy(payload.keyEvents.data(), data + offset, keyEventsCount * sizeof(Network::KeyEvent));
+        offset += keyEventsCount * sizeof(Network::KeyEvent);
+    }
+
+    return payload;
+}
+
 void LinuxInput::readFromHelperLoop() {
     if (!helper_connected_ || !ipc_socket_.is_open() || !running_) {
         return;
     }
+    
+    
 
     ipc_socket_.async_read_some(asio::buffer(ipc_read_buffer_),
         [this](const std::error_code& ec, std::size_t bytes_transferred) {
             if (!running_) return; // Stopped during async op
+            const size_t minPayloadSize = 14; //serialized header being sent over
 
             if (!ec) {
-                if (bytes_transferred >= sizeof(LT::Network::InputPayload)) { 
+                if (bytes_transferred >= minPayloadSize) { 
+                                
                     LT::Network::InputPayload payload;
-                    memcpy(&payload, ipc_read_buffer_.data(), sizeof(LT::Network::InputPayload)); 
-                    {
-                        std::lock_guard<std::mutex> lock(queue_mutex_);
-                        received_payloads_queue_.push_back(payload);
+                                
+                    auto maybePayload = deserializeInputPayload(reinterpret_cast<const uint8_t *> (ipc_read_buffer_.data()), (size_t)bytes_transferred);
+                    if (maybePayload) { std::lock_guard<std::mutex> lock(queue_mutex_);
+                        received_payloads_queue_.push_back(*maybePayload);
+                    } else {
+                        LT::Utils::Logger::GetInstance().Warning("LinuxInput: Failed to deserialize InputPayload");
                     }
                 } else if (bytes_transferred > 0) {
                     LT::Utils::Logger::GetInstance().Warning("LinuxInput: Received partial/invalid data from helper: " + std::to_string(bytes_transferred) + " bytes.");
