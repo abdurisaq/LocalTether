@@ -5,6 +5,7 @@
 #include "ui/panels/FileExplorerPanel.h"
 #include "ui/panels/NetworkSettingsPanel.h"
 #include "ui/panels/PropertiesPanel.h"
+#include "ui/panels/PauseSettingsPanel.h"
 #include "utils/ScanNetwork.h"
 #include "network/Message.h"
 #include "network/Server.h" 
@@ -287,16 +288,25 @@ void ShowJoinSetupPanel() {
   LocalTether::UI::Panels::FileExplorerPanel fileExplorer;
   LocalTether::UI::Panels::NetworkSettingsPanel networkSettings;
   LocalTether::UI::Panels::PropertiesPanel properties;
+  LocalTether::UI::Panels::PauseSettingsPanel pauseSettings;
 
-  void ShowHostDashboard() {
-      consolePanel.Show();
-      fileExplorer.Show();
-      networkSettings.Show();
-      properties.Show();
-  }
+void ShowHostDashboard() {
+    consolePanel.Show();
+    fileExplorer.Show();
+    networkSettings.Show();
+    properties.Show();
+    auto& client = LocalTether::UI::getClient();
+    if (client.getInputManager()) {
+        pauseSettings.Show(&LocalTether::UI::show_pause_settings, client.getInputManager());
+    }
+}
 
-  void ShowClientDashboard() {
-      consolePanel.Show();
-      networkSettings.Show();
-  }
+void ShowClientDashboard() {
+    consolePanel.Show();
+    networkSettings.Show();
+    auto& client = LocalTether::UI::getClient();
+    if (client.getInputManager()) {
+        pauseSettings.Show(&LocalTether::UI::show_pause_settings, client.getInputManager());
+    }
+}
 }

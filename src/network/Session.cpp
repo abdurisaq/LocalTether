@@ -9,7 +9,13 @@ Session::Session(asio::ip::tcp::socket socket)
 }
 
 Session::~Session() {
-    close();
+    if (active_.exchange(false)) {
+        if (socket_.is_open()) {
+            asio::error_code ec;
+            socket_.shutdown(asio::ip::tcp::socket::shutdown_both, ec); 
+            socket_.close(ec);                                       
+        }
+    }
 }
 
 void Session::start(MessageHandler msgHandler, DisconnectHandler disconnectHandler) {
@@ -21,33 +27,47 @@ void Session::start(MessageHandler msgHandler, DisconnectHandler disconnectHandl
 }
 
 void Session::send(const Message& message) {
+    if (!active_.load(std::memory_order_relaxed)) { 
+        return;
+    }
     auto serialized = message.serialize();
-    
-    asio::post(socket_.get_executor(), [this, serialized = std::move(serialized)]() {
-        bool shouldStartWrite = false;
-        
-        {
-            std::lock_guard<std::mutex> lock(writeMutex_);
-            shouldStartWrite = writeQueue_.empty() && !writing_;
-            writeQueue_.push(std::move(serialized));
+    LocalTether::Utils::Logger::GetInstance().Debug(
+        "Session sending message: " + std::to_string(static_cast<int>(message.getType())) +
+        " to client ID: " + std::to_string(clientId_));
+
+    auto self = shared_from_this(); // Capture shared_ptr
+    asio::post(socket_.get_executor(), [self, serialized_data = std::move(serialized)]() {
+        if (!self->active_.load(std::memory_order_relaxed)) {
+            return;
         }
-        
+        bool shouldStartWrite = false;
+        {
+            std::lock_guard<std::mutex> lock(self->writeMutex_);
+            shouldStartWrite = self->writeQueue_.empty() && !self->writing_.load(std::memory_order_relaxed);
+            self->writeQueue_.push(std::move(serialized_data));
+        }
+
         if (shouldStartWrite) {
-            doWrite();
+            self->doWrite();
         }
     });
 }
 
 void Session::close() {
-    if (!active_) return;
+    if (!active_.exchange(false)) {
+        return; 
+    }
+
     
-    active_ = false;
-    
-    
-    asio::post(socket_.get_executor(), [this]() {
-        asio::error_code ec;
-        socket_.shutdown(asio::ip::tcp::socket::shutdown_both, ec);
-        socket_.close(ec);
+    auto self = shared_from_this();
+    asio::post(socket_.get_executor(), [self]() {
+        
+        if (self->socket_.is_open()) {
+            asio::error_code ec_shutdown;
+            self->socket_.shutdown(asio::ip::tcp::socket::shutdown_both, ec_shutdown);
+            asio::error_code ec_close;
+            self->socket_.close(ec_close);
+        }
     });
 }
 
@@ -143,41 +163,55 @@ void Session::handleRead(const std::error_code& error, size_t bytes_transferred)
 }
 
 void Session::doWrite() {
-    auto self = shared_from_this();
-    
-    std::vector<uint8_t> data;
+    if (!active_.load(std::memory_order_relaxed)) {
+        
+        std::lock_guard<std::mutex> lock(writeMutex_);
+        if (!writeQueue_.empty()) {
+            std::queue<std::vector<uint8_t>> emptyQueue;
+            std::swap(writeQueue_, emptyQueue);
+        }
+        writing_ = false;
+        return;
+    }
+
+    std::vector<uint8_t> data_to_send;
     {
         std::lock_guard<std::mutex> lock(writeMutex_);
         if (writeQueue_.empty()) {
             writing_ = false;
             return;
         }
-        
-        writing_ = true;
-        data = std::move(writeQueue_.front());
+        writing_ = true; 
+        data_to_send = std::move(writeQueue_.front());
         writeQueue_.pop();
     }
-    
-    asio::async_write(
-        socket_, 
-        asio::buffer(data),
-        [this, self](const std::error_code& error, size_t ) {
-            if (!error) {
-                
-                doWrite();
-            }
-            else {
-                
-                active_ = false;
-                
-                LocalTether::Utils::Logger::GetInstance().Warning(
-                    "Session write error: " + error.message());
-                
-                if (disconnectHandler_) {
-                    disconnectHandler_(self);
-                }
-            }
+
+    auto self = shared_from_this(); 
+    asio::async_write(socket_, asio::buffer(data_to_send),
+        [self](const std::error_code& error, size_t bytes_transferred) {
+            self->handleWrite(error, bytes_transferred);
         });
+}
+void Session::handleWrite(const std::error_code& error, size_t /*bytes_transferred*/) {
+    if (!error) {
+       
+        std::lock_guard<std::mutex> lock(writeMutex_); 
+        if (!writeQueue_.empty()) {
+            
+            asio::post(socket_.get_executor(), [self = shared_from_this()]() { self->doWrite(); });
+        } else {
+            writing_ = false; 
+        }
+    } else {
+        writing_ = false; 
+        if (active_.exchange(false)) { 
+             LocalTether::Utils::Logger::GetInstance().Warning(
+                "Session write error for client ID " + std::to_string(clientId_) + ": " + error.message());
+            if (disconnectHandler_) {
+                disconnectHandler_(shared_from_this()); 
+            }
+        }
+    }
 }
 
 } 

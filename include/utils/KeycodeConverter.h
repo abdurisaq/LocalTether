@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cstdint>
-
+#include <string>
 //AI generated because i cant be bothered to write translation code like this myself
 
 #ifndef _WIN32
@@ -9,8 +9,6 @@
 #endif
 
 
-#ifndef _WIN32
-// Standard Virtual Key Codes
 #define VK_LBUTTON        0x01
 #define VK_RBUTTON        0x02
 #define VK_CANCEL         0x03
@@ -56,8 +54,6 @@
 #define VK_DELETE         0x2E
 #define VK_HELP           0x2F
 
-/* VK_0 thru VK_9 are the same as ASCII '0' thru '9' (0x30 - 0x39) */
-/* VK_A thru VK_Z are the same as ASCII 'A' thru 'Z' (0x41 - 0x5A) */
 
 #define VK_LWIN           0x5B
 #define VK_RWIN           0x5C
@@ -158,11 +154,9 @@
 #define VK_PA1            0xFD
 #define VK_OEM_CLEAR      0xFE
 
-// Define a VK_POWER, often maps to VK_SLEEP or is driver-dependent.
-// Using VK_SLEEP (0x5F) as a common stand-in.
+
 #define VK_POWER          VK_SLEEP 
 
-#endif // _WIN32
 
 
 namespace LocalTether {
@@ -170,19 +164,13 @@ namespace Utils {
 
 class KeycodeConverter {
 public:
-    /**
-     * @brief Converts an evdev keycode to a Windows Virtual Key (VK) code.
-     * @param evdevCode The evdev keycode (from <linux/input-event-codes.h>).
-     * @return The corresponding VK_Code, or 0 if no mapping exists.
-     */
+
     static uint8_t evdevToVk(uint16_t evdevCode);
 
-    /**
-     * @brief Converts a Windows Virtual Key (VK) code to an evdev keycode.
-     * @param vkCode The VK_Code.
-     * @return The corresponding evdev keycode, or 0 if no mapping exists.
-     */
     static uint16_t vkToEvdev(uint8_t vkCode);
+    static bool isVkMouseButton(uint8_t vkCode);
+
+
 };
 
 } // namespace Utils

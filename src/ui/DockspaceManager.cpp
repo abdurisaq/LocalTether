@@ -149,7 +149,8 @@ namespace LocalTether::UI {
             
             ImGuiID dock_bottom_id = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Down, 0.25f, nullptr, &dock_main_id);
 
-            
+            ImGuiID dock_right_bottom_id = ImGui::DockBuilderSplitNode(dock_right_id, ImGuiDir_Down, 0.4f, nullptr, &dock_right_id);
+
             ImGui::DockBuilderDockWindow("File Explorer", dock_left_id);
             ImGui::DockBuilderDockWindow("Network Settings", dock_left_id);
             ImGui::DockBuilderDockWindow("Example Panel", dock_main_id);
@@ -158,6 +159,8 @@ namespace LocalTether::UI {
             ImGui::DockBuilderDockWindow("Welcome", dock_main_id);
             ImGui::DockBuilderDockWindow("Host Setup", dock_main_id);
             ImGui::DockBuilderDockWindow("Join Setup", dock_main_id);
+
+            ImGui::DockBuilderDockWindow("Pause Key Combo Settings", dock_right_bottom_id);
 
             ImGui::DockBuilderFinish(dockspace_id);
         }

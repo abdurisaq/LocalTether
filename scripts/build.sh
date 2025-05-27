@@ -52,10 +52,10 @@ install_gui_deps() {
             sudo apt install -y libsdl2-dev libx11-dev libxext-dev libegl1-mesa-dev libgl1-mesa-dev libxkbcommon-dev libwayland-dev wayland-protocols libpolkit-gobject-1-dev
             ;;
         pacman)
-            sudo pacman -Sy --noconfirm sdl2 libx11 libxext mesa libxkbcommon wayland wayland-protocols polkit
+            sudo pacman -Sy --noconfirm sdl2 libx11 libxext mesa libxkbcommon wayland wayland-protocols polkit glib2-devel
             ;;
         dnf)
-            sudo dnf install -y SDL2-devel libX11-devel libXext-devel mesa-libEGL-devel mesa-libGL-devel libxkbcommon-devel wayland-devel wayland-protocols-devel polkit-devel
+            sudo dnf install -y SDL2-devel libX11-devel libXext-devel mesa-libEGL-devel mesa-libGL-devel libxkbcommon-devel wayland-devel wayland-protocols-devel polkit-devel polkit-libs glib2-devel
             ;;
     esac
 }

@@ -16,6 +16,7 @@ namespace LocalTether::UI {
     extern bool show_file_explorer;
     extern bool show_console;
     extern bool show_properties;
+    extern bool show_pause_settings;
 
     extern std::mutex g_mutex;
 

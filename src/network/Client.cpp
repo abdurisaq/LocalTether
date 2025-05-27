@@ -19,7 +19,25 @@ Client::Client(asio::io_context& io_context)
 
 Client::~Client() {
     disconnect();
+    initializeLocalScreenDimensions();
 }
+void Client::initializeLocalScreenDimensions() {
+    SDL_DisplayMode dm;
+    if (SDL_Init(SDL_INIT_VIDEO) < 0) { 
+         LocalTether::Utils::Logger::GetInstance().Warning("Client: SDL_Init(SDL_INIT_VIDEO) failed: " + std::string(SDL_GetError()) + ". Screen dimensions might be 0.");
+    }
+    if (SDL_GetCurrentDisplayMode(0, &dm) == 0) {
+        localScreenWidth_ = static_cast<uint16_t>(dm.w);
+        localScreenHeight_ = static_cast<uint16_t>(dm.h);
+        LocalTether::Utils::Logger::GetInstance().Info("Client local screen dimensions: " + std::to_string(localScreenWidth_) + "x" + std::to_string(localScreenHeight_));
+    } else {
+        LocalTether::Utils::Logger::GetInstance().Error("Client: Failed to get local screen dimensions using SDL: " + std::string(SDL_GetError()));
+        
+        localScreenWidth_ = 1920; 
+        localScreenHeight_ = 1080; 
+    }
+}
+
 
 void Client::connect(const std::string& host, uint16_t port, 
                     ClientRole role, const std::string& name, 
@@ -89,28 +107,6 @@ void Client::disconnect() {
     }
 }
 
-void Client::sendInput(const std::vector<uint8_t>& inputData) {
-    if (state_ != ClientState::Connected) {
-        return;
-    }
-    
-    auto msg = Message::createInput(inputData, clientId_);
-    auto data = msg.serialize();
-    
-    asio::post(io_context_, [this, data = std::move(data)]() {
-        bool shouldStartWrite = false;
-        
-        {
-            std::lock_guard<std::mutex> lock(writeMutex_);
-            shouldStartWrite = writeQueue_.empty() && !writing_;
-            writeQueue_.push(std::move(data));
-        }
-        
-        if (shouldStartWrite) {
-            doWrite();
-        }
-    });
-}
 
 void Client::sendInput(const InputPayload& payload) {
     if (state_ != ClientState::Connected) {
@@ -136,7 +132,8 @@ void Client::startInputLogging() {
         return;
     }
     LocalTether::Utils::Logger::GetInstance().Info("Attempting to start input logging...");
-    inputManager_ = LocalTether::Input::createInputManager();
+    
+    inputManager_ = LocalTether::Input::createInputManager(localScreenWidth_, localScreenHeight_);
 
     if (inputManager_ && inputManager_->start()) {
         loggingInput_ = true;
@@ -268,19 +265,26 @@ void Client::handleConnect(const std::error_code& error) {
 
 void Client::performHandshake() {
     
-    auto handshake = Message::createHandshake(role_, clientName_, password_, 0);
-    auto data = handshake.serialize();
-    
+    uint16_t screenWidth = 0;
+    uint16_t screenHeight = 0;
+
+    if (role_ == ClientRole::Host) {
+        screenWidth = localScreenWidth_; 
+        screenHeight = localScreenHeight_;
+    }
+
+    auto handshake_payload = Network::HandshakePayload{role_, clientName_, password_, screenWidth, screenHeight};
+    auto msg = Message::createHandshake(handshake_payload, 0); 
+    auto data = msg.serialize();
+
     asio::async_write(socket_, asio::buffer(data),
         [this](const std::error_code& error, size_t) {
             if (error) {
                 setState(ClientState::Error, error);
-                
                 if (errorHandler_) {
                     errorHandler_(error);
                 }
             }
-          
         });
 }
 
@@ -295,6 +299,9 @@ void Client::handleRead(const std::error_code& error, size_t bytes_transferred) 
     if (!error) {
         try {
             
+            LocalTether::Utils::Logger::GetInstance().Debug(
+                "Received " + std::to_string(bytes_transferred) + " bytes from server.");
+                
             partialMessage_.insert(partialMessage_.end(), 
                                  readBuffer_.data(), 
                                  readBuffer_.data() + bytes_transferred);
@@ -365,23 +372,36 @@ void Client::handleRead(const std::error_code& error, size_t bytes_transferred) 
 
 void Client::handleMessage(const Message& message) {
     
+    
+
     if (message.getType() == MessageType::Handshake) {
         if (state_ == ClientState::Connecting) {
             
+            HandshakePayload serverResponsePayload = message.getHandshakePayload(); 
+            hostScreenWidth_ = serverResponsePayload.hostScreenWidth;
+            hostScreenHeight_ = serverResponsePayload.hostScreenHeight;
+            clientId_ = message.getClientId(); 
+
+            LocalTether::Utils::Logger::GetInstance().Info(
+                "Handshake successful. Client ID: " + std::to_string(clientId_) +
+                ". Host screen: " + std::to_string(hostScreenWidth_) + "x" + std::to_string(hostScreenHeight_));
+
             setState(ClientState::Connected);
-            
-    
-            clientId_ = message.getClientId();
-            if (role_ == ClientRole::Host && connectHandler_) { 
-                 LocalTether::Utils::Logger::GetInstance().Info("Client is Host, starting input logging.");
-                 startInputLogging();
+
+            if (role_ == ClientRole::Host && connectHandler_) {
+                LocalTether::Utils::Logger::GetInstance().Info("Client is Host, starting input logging.");
+                startInputLogging();
+            } else if (role_ != ClientRole::Host) { 
+                if (!inputManager_) {
+                    inputManager_ = LocalTether::Input::createInputManager(localScreenWidth_, localScreenHeight_);
+                }
+                if (inputManager_) {
+                    inputManager_->start(); // Ensure it's started
+                    LocalTether::Utils::Logger::GetInstance().Info("InputManager started for receiver client for simulation.");
+                } else {
+                    LocalTether::Utils::Logger::GetInstance().Error("Failed to create/start InputManager for simulation on receiver client.");
+                }
             }
-            if (role_ != ClientRole::Host && !inputManager_) { 
-            inputManager_ = LocalTether::Input::createInputManager();
-            if (!inputManager_) {
-                LocalTether::Utils::Logger::GetInstance().Error("Failed to create InputManager for simulation on receiver client.");
-            }
-        }
             if (connectHandler_) {
                 connectHandler_();
             }
@@ -392,8 +412,26 @@ void Client::handleMessage(const Message& message) {
     if (message.getType() == MessageType::Input && role_ != ClientRole::Host) {
         if (inputManager_) { 
             try {
+                std::string keyLog = "Client received input";
+                
+                const auto& keyEvents = message.getInputPayload().keyEvents;
+                for(const auto & event : keyEvents){
+                    keyLog += " Key: " + std::to_string(event.keyCode) + 
+                              (event.isPressed ? " Pressed" : " Released");
+
+                    keyLog += LocalTether::Utils::Logger::getKeyName(event.keyCode) + " ";
+                }
+                if (message.getInputPayload().isMouseEvent) {
+                    keyLog += " Mouse Event: ";
+                    keyLog += "RelativeX: " + std::to_string(message.getInputPayload().relativeX) + 
+                              " RelativeY: " + std::to_string(message.getInputPayload().relativeY);
+                }
+            
+                
+                LocalTether::Utils::Logger::GetInstance().Info(keyLog);
+                
                 InputPayload receivedPayload = message.getInputPayload();
-                inputManager_->simulateInput(receivedPayload); 
+                inputManager_->simulateInput(receivedPayload,hostScreenWidth_, hostScreenHeight_); 
             } catch (const std::exception& e) {
                 LocalTether::Utils::Logger::GetInstance().Error(
                     "Failed to process received input: " + std::string(e.what()));

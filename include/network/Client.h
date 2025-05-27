@@ -10,6 +10,8 @@
 #include <atomic>
 #include <thread>
 #include "input/InputManager.h"
+#include "utils/KeycodeConverter.h"
+#include <SDL.h>
 
 namespace LocalTether::Network {
 
@@ -57,6 +59,11 @@ public:
     void setDisconnectHandler(DisconnectHandler handler);
     void setErrorHandler(ErrorHandler handler);
 
+    void initializeLocalScreenDimensions();
+
+    LocalTether::Input::InputManager* getInputManager() {
+        return inputManager_.get();
+    }
 private:
     void handleMessage(const Message& message);
 
@@ -104,6 +111,13 @@ private:
     MessageHandler messageHandler_;
     DisconnectHandler disconnectHandler_;
     ErrorHandler errorHandler_;
+
+    uint32_t hostScreenWidth_ = 0;
+    uint32_t hostScreenHeight_ = 0;
+
+
+    uint32_t localScreenWidth_ = 0;
+    uint32_t localScreenHeight_ = 0;
 };
 
 } 

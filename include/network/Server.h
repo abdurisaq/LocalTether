@@ -9,6 +9,7 @@
 #include <atomic>
 #include <mutex>
 #include <algorithm> 
+#include "utils/KeycodeConverter.h"
 
 namespace LocalTether::Network {
 
@@ -54,7 +55,9 @@ public:
     std::string password;
     bool localNetworkOnly;
     uint32_t hostClientId = 0; 
-
+    uint32_t hostScreenWidth_ = 0;
+    uint32_t hostScreenHeight_ = 0;
+    
 private:
     
     void doAccept();
@@ -87,6 +90,7 @@ private:
     std::string lastError_;
     ConnectionHandler connectionHandler_;
     ErrorHandler errorHandler_;
+
 };
 
 } 

@@ -13,6 +13,7 @@ namespace LocalTether::UI {
     bool show_file_explorer = true;
     bool show_console = true;
     bool show_properties = true;
+    bool show_pause_settings = true;
     std::mutex g_mutex;
     AppMode app_mode = AppMode::None;
     

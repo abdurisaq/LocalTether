@@ -125,11 +125,23 @@ uint16_t KeycodeConverter::vkToEvdev(uint8_t vkCode) {
     if (it != vk_to_evdev_map.end()) {
         return it->second;
     }
-    // For unmapped keys, return 0 (which is KEY_RESERVED)
     return 0;
 }
 
-} // namespace Utils
-} // namespace LocalTether
+bool KeycodeConverter::isVkMouseButton(uint8_t vkCode) {
+    switch (vkCode) {
+        case VK_LBUTTON:
+        case VK_RBUTTON:
+        case VK_MBUTTON:
+        case VK_XBUTTON1:
+        case VK_XBUTTON2:
+            return true;
+        default:
+            return false;
+    }
+}
 
-#endif // !_WIN32
+}
+}
+
+#endif 

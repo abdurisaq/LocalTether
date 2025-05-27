@@ -5,9 +5,9 @@
 
 namespace LocalTether::Network {
 
-enum class MessageType : uint8_t {
-    Input,         
-    ChatMessage,    
+enum class MessageType : uint8_t { 
+    ChatMessage,   
+    Input,     
     FileRequest,  
     FileData,       
     Command,        
@@ -38,14 +38,16 @@ struct HandshakePayload {
     ClientRole role;
     std::string clientName;
     std::string password;
+    uint16_t hostScreenWidth = 0; 
+    uint16_t hostScreenHeight = 0;
 };
 
 struct InputPayload {
     std::vector<KeyEvent> keyEvents;  
     bool isMouseEvent = false;      
-    int16_t deltaX = 0;              
-    int16_t deltaY = 0;            
-    uint8_t mouseButtons = 0;         //mouseY
+    float relativeX = -1.0f;  
+    float relativeY = -1.0f;      
+    uint8_t mouseButtons = 0;         
     int16_t scrollDeltaX = 0;
     int16_t scrollDeltaY = 0;
 };
@@ -72,15 +74,14 @@ struct CommandPayload {
 class Message {
 public:
     
-    static Message createInput(const std::vector<uint8_t>& inputData, uint32_t clientId);
     static Message createInput(const InputPayload& inputPayload, uint32_t clientId);
     static Message createChat(const std::string& text, uint32_t clientId);
     static Message createFileRequest(const std::string& filename, uint32_t clientId);
     static Message createFileData(const std::string& filename, const std::vector<uint8_t>& chunk, 
                                uint32_t chunkId, uint32_t totalChunks, uint32_t clientId);
     static Message createCommand(const std::string& command, uint32_t clientId);
-    static Message createHandshake(ClientRole role, const std::string& clientName, 
-                                const std::string& password, uint32_t clientId = 0);
+
+    static Message createHandshake(const HandshakePayload& payload, uint32_t clientId = 0);
     
 
     HandshakePayload getHandshakePayload() const;

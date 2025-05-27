@@ -21,6 +21,10 @@ public:
     bool IsRunning() const { return running; }
     
 
+    int GetWindowWidth() const { return width; }
+    int GetWindowHeight() const { return height; }
+
+
     void Quit() { running = false; }
     
 
@@ -66,8 +70,7 @@ private:
     
 
     std::function<void()> renderCallback;
-    
-    // Singleton instance
+   
     static SDLApp* instance;
 };
 

@@ -2,6 +2,7 @@
 #include <string>
 #include <unordered_map>
 #include <any>
+#include <cstdint>
 
 //not used yet
 
@@ -11,8 +12,8 @@ namespace LocalTether::Utils {
         static Config& GetInstance();
         
 
-        bool LoadFromFile(const std::string& filepath);
-        bool SaveToFile(const std::string& filepath);
+        bool LoadFromFile();
+        bool SaveToFile();
         
         template<typename T>
         void Set(const std::string& key, const T& value);
@@ -22,6 +23,9 @@ namespace LocalTether::Utils {
         T Get(const std::string& key, const T& defaultValue);
 
         bool HasKey(const std::string& key);
+
+        static const std::string PAUSE_COMBO_KEY;
+        static const std::string default_config_filepath_;
         
     private:
         Config();

@@ -3,13 +3,12 @@
 #include "utils/Logger.h"
 #include "network/Message.h"
 #include "utils/KeycodeConverter.h"
-
+#include "utils/Serialization.h"
 #include <asio.hpp>
 #include <asio/local/stream_protocol.hpp>
 #include <libevdev/libevdev.h>
 #include <libevdev/libevdev-uinput.h>
 #include <libudev.h>
-
 #include <iostream>
 #include <string>
 #include <vector>
@@ -24,115 +23,166 @@
 #include <linux/input-event-codes.h>
 #include <sys/select.h>
 #include <sys/mman.h>
-#include <sys/stat.h> // For mode constants
+#include <sys/stat.h>
+#include <pwd.h>
+#include <map>
+#include <optional>
+#include <algorithm>
+#include <array>
 
 namespace LT = LocalTether;
 
-// Define structure for shared memory
 struct HelperSharedData {
     pid_t helper_pid;
-    char socket_path[256]; // Max path length for socket
-    bool ready;            // Flag to indicate data is ready
+    char socket_path[256];
+    bool ready;
 };
+enum class IPCCommandType : uint8_t {
+        SimulateInput = 1,
+        PauseStream = 2,
+        ResumeStream = 3,
+        Shutdown = 4
+    };
 
-const char* SHM_NAME = "/localtether_shm_helper_info";
-static HelperSharedData* g_shared_data = nullptr;
+const char* SHM_NAME = "/localtether_shm_helper_info"; 
+static HelperSharedData* g_shared_data_ptr = nullptr;
 static int g_shm_fd = -1;
-static std::string G_ACTUAL_SOCKET_PATH; // Will be determined at runtime
 
 namespace LocalTether::Input {
 
 static std::atomic<bool> g_helper_running = true;
 static asio::io_context* g_ipc_io_context_ptr = nullptr;
-static asio::local::stream_protocol::socket* g_client_socket_ptr = nullptr;
+static asio::local::stream_protocol::socket* g_main_app_socket_ptr = nullptr;
 
 static std::vector<struct libevdev*> g_evdev_devices;
 static std::vector<int> g_evdev_fds;
 static struct libevdev_uinput* g_uinput_device = nullptr;
-static std::atomic<bool> g_input_stream_paused(false);
+static std::atomic<bool> g_input_polling_paused(false);
+
+static int g_client_screen_width = 0;
+static int g_client_screen_height = 0;
+static std::string G_ACTUAL_SOCKET_PATH;
 
 
-static int32_t last_abs_x = 0, last_abs_y = 0;//-1
-static int32_t last_scroll_x = 0, last_scroll_y = 0;
-const int DEADZONE = 5;
+static int32_t g_helper_abs_x = 0;
+static int32_t g_helper_abs_y = 0;
+static uint8_t g_helper_mouse_buttons_state = 0;
+
+static int32_t g_helper_last_sent_abs_x = 0;
+static int32_t g_helper_last_sent_abs_y = 0;
+static uint8_t g_helper_last_sent_mouse_buttons = 0;
+
+static bool g_helper_mouse_state_initialized = false;
+
+static std::map<int, struct input_absinfo> g_abs_x_info_map;
+static std::map<int, struct input_absinfo> g_abs_y_info_map;
+
+static const int HELPER_MOUSE_DEADZONE_SQUARED = 5 * 5;
+
+static std::map<int, bool> g_device_is_touch_pointer;
+static std::map<int, bool> g_device_touch_is_active;
+static std::map<int, std::optional<std::pair<int32_t, int32_t>>> g_device_initial_raw_abs_at_touch_start; 
+static std::map<int, std::optional<std::pair<int32_t, int32_t>>> g_device_screen_coords_at_touch_start;
+static std::map<int, std::optional<int32_t>> g_pending_abs_x_for_fd;
+static std::map<int, std::optional<int32_t>> g_pending_abs_y_for_fd;
+
+static constexpr size_t VK_KEY_STATE_ARRAY_SIZE = (256 / 8);
+static std::array<uint8_t, VK_KEY_STATE_ARRAY_SIZE> g_helper_vk_key_states_bitmask;
+
+static void update_helper_vk_key_state(uint8_t vk_code, bool pressed) {
+    if (vk_code == 0) return;
+    size_t byte_index = vk_code / 8;
+    size_t bit_index = vk_code % 8;
+    if (byte_index < VK_KEY_STATE_ARRAY_SIZE) {
+        if (pressed) {
+            g_helper_vk_key_states_bitmask[byte_index] |= (1 << bit_index);
+        } else {
+            g_helper_vk_key_states_bitmask[byte_index] &= ~(1 << bit_index);
+        }
+    }
+}
+
+static bool is_helper_vk_key_pressed(uint8_t vk_code) {
+    if (vk_code == 0) return false;
+    size_t byte_index = vk_code / 8;
+    size_t bit_index = vk_code % 8;
+    if (byte_index < VK_KEY_STATE_ARRAY_SIZE) {
+        return (g_helper_vk_key_states_bitmask[byte_index] & (1 << bit_index)) != 0;
+    }
+    return false;
+}
+
+
+static inline int32_t scale_abs_value_to_screen(int32_t value, const struct input_absinfo* absinfo, int32_t screen_dim) {
+    if (!absinfo || absinfo->maximum == absinfo->minimum || screen_dim <= 0) {
+        return screen_dim / 2;
+    }
+    value = std::max(absinfo->minimum, std::min(value, absinfo->maximum));
+    double ratio = static_cast<double>(value - absinfo->minimum) / (absinfo->maximum - absinfo->minimum);
+    return static_cast<int32_t>(ratio * (screen_dim - 1));
+}
+
 
 void helper_signal_handler(int signum) {
-    LT::Utils::Logger::GetInstance().Info("Input Helper: Received signal " + std::to_string(signum) + ". Shutting down.");
+    LT::Utils::Logger::GetInstance().Info("Input Helper: Signal " + std::to_string(signum) + " received. Shutting down.");
     g_helper_running = false;
-    if (g_ipc_io_context_ptr) {
+    if (g_ipc_io_context_ptr && !g_ipc_io_context_ptr->stopped()) {
         g_ipc_io_context_ptr->stop();
     }
 }
 
-bool setup_shared_memory() {
-    shm_unlink(SHM_NAME); // Clean up previous instance, if any
-
-    g_shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
-    fchmod(g_shm_fd,0666);
-    if (g_shm_fd == -1) {
-        LT::Utils::Logger::GetInstance().Error("Input Helper: shm_open failed: " + std::string(strerror(errno)));
-        return false;
-    }
-
-    if (ftruncate(g_shm_fd, sizeof(HelperSharedData)) == -1) {
-        LT::Utils::Logger::GetInstance().Error("Input Helper: ftruncate failed: " + std::string(strerror(errno)));
-        close(g_shm_fd);
-        shm_unlink(SHM_NAME);
-        return false;
-    }
-
-    g_shared_data = (HelperSharedData*)mmap(NULL, sizeof(HelperSharedData), PROT_READ | PROT_WRITE, MAP_SHARED, g_shm_fd, 0);
-    if (g_shared_data == MAP_FAILED) {
-        LT::Utils::Logger::GetInstance().Error("Input Helper: mmap failed: " + std::string(strerror(errno)));
-        close(g_shm_fd);
-        shm_unlink(SHM_NAME);
-        return false;
-    }
-
-    memset(g_shared_data, 0, sizeof(HelperSharedData)); // Initialize
-    LT::Utils::Logger::GetInstance().Info("Input Helper: Shared memory segment " + std::string(SHM_NAME) + " created and mapped.");
-    return true;
-}
-
-void write_info_to_shared_memory() {
-    if (!g_shared_data) {
-        LT::Utils::Logger::GetInstance().Error("Input Helper: Cannot write to uninitialized shared memory.");
-        return;
-    }
-    g_shared_data->helper_pid = getpid();
-    strncpy(g_shared_data->socket_path, G_ACTUAL_SOCKET_PATH.c_str(), sizeof(g_shared_data->socket_path) - 1);
-    g_shared_data->socket_path[sizeof(g_shared_data->socket_path) - 1] = '\0'; // Ensure null termination
-    g_shared_data->ready = true; // Signal that data is ready
-
-    LT::Utils::Logger::GetInstance().Info("Input Helper: PID " + std::to_string(getpid()) + " and socket path '" + G_ACTUAL_SOCKET_PATH + "' written to shared memory.");
-}
-
 void cleanup_shared_memory() {
-    if (g_shared_data != nullptr && g_shared_data != MAP_FAILED) {
-        munmap(g_shared_data, sizeof(HelperSharedData));
-        g_shared_data = nullptr;
+    if (g_shared_data_ptr && g_shared_data_ptr != MAP_FAILED) {
+        munmap(g_shared_data_ptr, sizeof(HelperSharedData));
+        g_shared_data_ptr = nullptr;
     }
     if (g_shm_fd != -1) {
         close(g_shm_fd);
         g_shm_fd = -1;
     }
-
-    if (shm_unlink(SHM_NAME) == -1) {
-    
+    if (shm_unlink(SHM_NAME) == -1 && errno != ENOENT) {
         LT::Utils::Logger::GetInstance().Warning("Input Helper: shm_unlink failed: " + std::string(strerror(errno)));
-    } else {
-        LT::Utils::Logger::GetInstance().Info("Input Helper: Shared memory segment " + std::string(SHM_NAME) + " unlinked.");
     }
+}
+
+bool setup_shared_memory() {
+    shm_unlink(SHM_NAME);
+
+    g_shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
+    if (g_shm_fd == -1) {
+        LT::Utils::Logger::GetInstance().Error("Input Helper: shm_open failed: " + std::string(strerror(errno)));
+        return false;
+    }
+    if (ftruncate(g_shm_fd, sizeof(HelperSharedData)) == -1) {
+        LT::Utils::Logger::GetInstance().Error("Input Helper: ftruncate failed: " + std::string(strerror(errno)));
+        close(g_shm_fd); shm_unlink(SHM_NAME); return false;
+    }
+    g_shared_data_ptr = (HelperSharedData*)mmap(NULL, sizeof(HelperSharedData), PROT_READ | PROT_WRITE, MAP_SHARED, g_shm_fd, 0);
+    if (g_shared_data_ptr == MAP_FAILED) {
+        LT::Utils::Logger::GetInstance().Error("Input Helper: mmap failed: " + std::string(strerror(errno)));
+        close(g_shm_fd); shm_unlink(SHM_NAME); return false;
+    }
+    memset(g_shared_data_ptr, 0, sizeof(HelperSharedData));
+    g_shared_data_ptr->ready = false;
+    return true;
+}
+
+void write_info_to_shared_memory() {
+    if (!g_shared_data_ptr || g_shared_data_ptr == MAP_FAILED) return;
+    g_shared_data_ptr->helper_pid = getpid();
+    strncpy(g_shared_data_ptr->socket_path, G_ACTUAL_SOCKET_PATH.c_str(), sizeof(g_shared_data_ptr->socket_path) - 1);
+    g_shared_data_ptr->socket_path[sizeof(g_shared_data_ptr->socket_path) - 1] = '\0';
+    g_shared_data_ptr->ready = true;
+    LT::Utils::Logger::GetInstance().Info("Input Helper: PID " + std::to_string(getpid()) + " and socket '" + G_ACTUAL_SOCKET_PATH + "' written to SHM.");
 }
 
 void cleanup_helper_resources() {
     LT::Utils::Logger::GetInstance().Info("Input Helper: Cleaning up resources...");
-    if (g_client_socket_ptr && g_client_socket_ptr->is_open()) {
+    if (g_main_app_socket_ptr && g_main_app_socket_ptr->is_open()) {
         asio::error_code ec;
-        g_client_socket_ptr->shutdown(asio::socket_base::shutdown_both, ec);
-        g_client_socket_ptr->close(ec);
+        g_main_app_socket_ptr->shutdown(asio::local::stream_protocol::socket::shutdown_both, ec);
+        g_main_app_socket_ptr->close(ec);
     }
-
     if (g_uinput_device) {
         libevdev_uinput_destroy(g_uinput_device);
         g_uinput_device = nullptr;
@@ -148,30 +198,43 @@ void cleanup_helper_resources() {
     if (!G_ACTUAL_SOCKET_PATH.empty()) {
         std::error_code ec_fs;
         std::filesystem::remove(G_ACTUAL_SOCKET_PATH, ec_fs);
-        if (ec_fs) {
+        if (ec_fs && ec_fs.value() != ENOENT) {
              LT::Utils::Logger::GetInstance().Warning("Input Helper: Failed to remove socket file " + G_ACTUAL_SOCKET_PATH + ": " + ec_fs.message());
         }
     }
-    
-    cleanup_shared_memory(); // Cleanup shared memory here
+    cleanup_shared_memory();
     LT::Utils::Logger::GetInstance().Info("Input Helper: Resources cleaned up.");
 }
 
-
 bool initialize_input_devices() {
-    LT::Utils::Logger::GetInstance().Info("Input Helper: Initializing input devices using libudev...");
-
     struct udev *udev = udev_new();
-    if (!udev) {
-        LT::Utils::Logger::GetInstance().Error("Input Helper: Cannot create udev context.");
-        return false;
-    }
+    if (!udev) { LT::Utils::Logger::GetInstance().Error("Input Helper: udev_new failed."); return false; }
 
     struct udev_enumerate *enumerate = udev_enumerate_new(udev);
     udev_enumerate_add_match_subsystem(enumerate, "input");
     udev_enumerate_scan_devices(enumerate);
     struct udev_list_entry *devices = udev_enumerate_get_list_entry(enumerate);
     struct udev_list_entry *dev_list_entry;
+
+    g_helper_vk_key_states_bitmask.fill(0);
+    g_abs_x_info_map.clear();
+    g_abs_y_info_map.clear();
+    g_device_is_touch_pointer.clear();
+    g_device_touch_is_active.clear();
+    g_device_initial_raw_abs_at_touch_start.clear();
+    g_device_screen_coords_at_touch_start.clear();
+    g_pending_abs_x_for_fd.clear();
+    g_pending_abs_y_for_fd.clear();
+
+    if (g_client_screen_width > 0 && g_client_screen_height > 0) {
+        g_helper_abs_x = g_client_screen_width / 2;
+        g_helper_abs_y = g_client_screen_height / 2;
+        g_helper_last_sent_abs_x = g_helper_abs_x;
+        g_helper_last_sent_abs_y = g_helper_abs_y;
+        g_helper_mouse_state_initialized = true;
+    } else {
+        g_helper_mouse_state_initialized = false;
+    }
 
     udev_list_entry_foreach(dev_list_entry, devices) {
         const char *path = udev_list_entry_get_name(dev_list_entry);
@@ -180,359 +243,518 @@ bool initialize_input_devices() {
 
         const char *devnode = udev_device_get_devnode(dev_udev);
         if (!devnode || strncmp(devnode, "/dev/input/event", 16) != 0) {
-            udev_device_unref(dev_udev);
-            continue;
-
+            udev_device_unref(dev_udev); continue;
         }
-        
-        const char * name = udev_device_get_sysname(dev_udev);
-        const char * product = udev_device_get_property_value(dev_udev,"NAME");
 
-        LT::Utils::Logger::GetInstance().Info(
-            std::string("Input Helper: Found device: ")+
-            (name ? name : "unknown") +
-            ", devnode: " + devnode +
-            ", NAME: " + (product? product : "unknown")
-        );
+        bool is_relevant_for_polling = false;
+        const char* id_keyboard = udev_device_get_property_value(dev_udev, "ID_INPUT_KEYBOARD");
+        const char* id_mouse = udev_device_get_property_value(dev_udev, "ID_INPUT_MOUSE");
+        const char* id_touchpad = udev_device_get_property_value(dev_udev, "ID_INPUT_TOUCHPAD");
+        const char* id_input = udev_device_get_property_value(dev_udev, "ID_INPUT");
 
-        const char * props[] = {
-            udev_device_get_property_value(dev_udev, "ID_INPUT_KEYBOARD"),
-            udev_device_get_property_value(dev_udev, "ID_INPUT_MOUSE"),
-            udev_device_get_property_value(dev_udev, "ID_INPUT_TOUCHPAD"),
-            udev_device_get_property_value(dev_udev, "ID_INPUT_TABLET"),
-            udev_device_get_property_value(dev_udev, "ID_INPUT_POINTINGSTICK")
-        };
+        if ((id_keyboard && strcmp(id_keyboard, "1") == 0) ||
+            (id_mouse && strcmp(id_mouse, "1") == 0) ||
+            (id_touchpad && strcmp(id_touchpad, "1") == 0) ||
+            (id_input && strcmp(id_input, "1") == 0)
+            ) {
+            is_relevant_for_polling = true;
+        }
 
-        bool is_potential_device = false;
+        if (is_relevant_for_polling) {
+            int fd = open(devnode, O_RDONLY | O_NONBLOCK);
+            if (fd < 0) { udev_device_unref(dev_udev); continue; }
 
-        for( const char * prop : props){
-            if (prop && strcmp(prop, "1") == 0) {
-                is_potential_device = true;
-                break;
+            struct libevdev *ev_dev = libevdev_new();
+            if (libevdev_set_fd(ev_dev, fd) < 0) {
+                libevdev_free(ev_dev); close(fd); udev_device_unref(dev_udev); continue;
             }
-        }
-        if(!is_potential_device){
-            udev_device_unref(dev_udev);
-            continue;
-        }
+            
+            bool has_keys = libevdev_has_event_type(ev_dev, EV_KEY);
+            bool has_rel_motion = libevdev_has_event_type(ev_dev, EV_REL) &&
+                                  (libevdev_has_event_code(ev_dev, EV_REL, REL_X) || libevdev_has_event_code(ev_dev, EV_REL, REL_Y));
+            bool has_abs_motion = libevdev_has_event_type(ev_dev, EV_ABS) &&
+                                  (libevdev_has_event_code(ev_dev, EV_ABS, ABS_X) || libevdev_has_event_code(ev_dev, EV_ABS, ABS_Y) ||
+                                   libevdev_has_event_code(ev_dev, EV_ABS, ABS_MT_POSITION_X) || libevdev_has_event_code(ev_dev, EV_ABS, ABS_MT_POSITION_Y));
+            bool has_scroll = libevdev_has_event_type(ev_dev, EV_REL) &&
+                              (libevdev_has_event_code(ev_dev, EV_REL, REL_WHEEL) || libevdev_has_event_code(ev_dev, EV_REL, REL_HWHEEL));
 
-        int fd = open(devnode,O_RDONLY | O_NONBLOCK);
+            if (has_keys || has_rel_motion || has_abs_motion || has_scroll) {
+                g_evdev_devices.push_back(ev_dev);
+                g_evdev_fds.push_back(fd);
+                LT::Utils::Logger::GetInstance().Info("Input Helper: Polling device: " + std::string(devnode) + " (" + libevdev_get_name(ev_dev) + ")");
 
-        if (fd < 0) {
-            udev_device_unref(dev_udev);
-            continue;
-        }
+                if (libevdev_has_event_code(ev_dev, EV_ABS, ABS_X)) {
+                    const struct input_absinfo *absinfo = libevdev_get_abs_info(ev_dev, ABS_X);
+                    if (absinfo) g_abs_x_info_map[fd] = *absinfo;
+                }
+                if (libevdev_has_event_code(ev_dev, EV_ABS, ABS_Y)) {
+                    const struct input_absinfo *absinfo = libevdev_get_abs_info(ev_dev, ABS_Y);
+                    if (absinfo) g_abs_y_info_map[fd] = *absinfo;
+                }
+                if (libevdev_has_event_code(ev_dev, EV_ABS, ABS_MT_POSITION_X) && g_abs_x_info_map.find(fd) == g_abs_x_info_map.end()) {
+                    const struct input_absinfo *absinfo = libevdev_get_abs_info(ev_dev, ABS_MT_POSITION_X);
+                    if (absinfo) g_abs_x_info_map[fd] = *absinfo;
+                }
+                if (libevdev_has_event_code(ev_dev, EV_ABS, ABS_MT_POSITION_Y) && g_abs_y_info_map.find(fd) == g_abs_y_info_map.end()) {
+                    const struct input_absinfo *absinfo = libevdev_get_abs_info(ev_dev, ABS_MT_POSITION_Y);
+                    if (absinfo) g_abs_y_info_map[fd] = *absinfo;
+                }
 
-        struct libevdev *ev_dev = libevdev_new();
-        if (libevdev_set_fd(ev_dev, fd) < 0) {
-            libevdev_free(ev_dev);
-            close(fd);
-            udev_device_unref(dev_udev);
-            continue;
-        }
-        bool hasUsefulInput = false;
-        if(libevdev_has_event_type(ev_dev,EV_KEY)){
-           hasUsefulInput = true; 
+                bool dev_has_abs_xy = (g_abs_x_info_map.count(fd) && g_abs_y_info_map.count(fd));
+                bool dev_has_btn_touch = libevdev_has_event_code(ev_dev, EV_KEY, BTN_TOUCH);
 
-        }
-        if(libevdev_has_event_type(ev_dev,EV_REL)){
-            if(libevdev_has_event_code(ev_dev,EV_REL,REL_X) || libevdev_has_event_code(ev_dev,EV_REL, REL_Y)){
-                hasUsefulInput = true;
+                if (dev_has_abs_xy && dev_has_btn_touch) {
+                    g_device_is_touch_pointer[fd] = true;
+                    LT::Utils::Logger::GetInstance().Debug("Input Helper: Device " + std::string(devnode) + " registered as a touch pointer.");
+                } else {
+                    g_device_is_touch_pointer[fd] = false;
+                }
+                g_device_touch_is_active[fd] = false;
+            } else {
+                libevdev_free(ev_dev); close(fd);
             }
-        }
-        if(libevdev_has_event_type(ev_dev,EV_ABS)){
-            if(libevdev_has_event_code(ev_dev,EV_ABS,ABS_X) || libevdev_has_event_code(ev_dev,EV_ABS,ABS_Y) ||
-                libevdev_has_event_code(ev_dev,EV_ABS,ABS_MT_POSITION_X) ||libevdev_has_event_code(ev_dev,EV_ABS,ABS_MT_POSITION_Y)){
-                hasUsefulInput = true;
-            }
-        }
-        if(hasUsefulInput){ 
-            g_evdev_devices.push_back(ev_dev);
-            g_evdev_fds.push_back(fd);
-        } else {
-            libevdev_free(ev_dev);
-            close(fd);
         }
         udev_device_unref(dev_udev);
     }
     udev_enumerate_unref(enumerate);
     udev_unref(udev);
 
-    if (g_evdev_devices.empty()) {
-        LT::Utils::Logger::GetInstance().Warning("Input Helper: No suitable input devices found.");
+    struct libevdev* uinput_template_dev = libevdev_new();
+    if (!uinput_template_dev) { 
+        LT::Utils::Logger::GetInstance().Error("Input Helper: libevdev_new failed for uinput_template_dev.");
+        return false; 
     }
+    libevdev_set_name(uinput_template_dev, "LocalTether Virtual Input");
 
-    struct libevdev* uinput_base_dev = libevdev_new();
-    libevdev_set_name(uinput_base_dev, "LocalTether Virtual Input Device");
-    libevdev_enable_event_type(uinput_base_dev, EV_KEY);
-    libevdev_enable_event_type(uinput_base_dev, EV_REL);
-    libevdev_enable_event_type(uinput_base_dev, EV_ABS);
-    libevdev_enable_event_type(uinput_base_dev, EV_SYN);
-    for (unsigned int key_code = 0; key_code < KEY_MAX; ++key_code) {
-        libevdev_enable_event_code(uinput_base_dev, EV_KEY, key_code, nullptr);
+    libevdev_enable_event_type(uinput_template_dev, EV_SYN);
+    libevdev_enable_event_code(uinput_template_dev, EV_SYN, SYN_REPORT, nullptr);
+
+    libevdev_enable_event_type(uinput_template_dev, EV_KEY);
+    for (unsigned int key = KEY_ESC; key <= KEY_KPDOT; ++key) { 
+        libevdev_enable_event_code(uinput_template_dev, EV_KEY, key, nullptr);
     }
-    libevdev_enable_event_code(uinput_base_dev, EV_REL, REL_X, nullptr);
-    libevdev_enable_event_code(uinput_base_dev, EV_REL, REL_Y, nullptr);
-    libevdev_enable_event_code(uinput_base_dev, EV_REL, REL_WHEEL, nullptr);
-    libevdev_enable_event_code(uinput_base_dev, EV_REL, REL_HWHEEL, nullptr);
-
-    libevdev_enable_event_code(uinput_base_dev, EV_ABS, ABS_X, nullptr);
-    libevdev_enable_event_code(uinput_base_dev, EV_ABS, ABS_Y, nullptr);
-    libevdev_enable_event_code(uinput_base_dev, EV_ABS, ABS_MT_POSITION_X, nullptr);
-    libevdev_enable_event_code(uinput_base_dev, EV_ABS, ABS_MT_POSITION_Y, nullptr);
-
-
-    libevdev_enable_event_code(uinput_base_dev, EV_KEY, BTN_LEFT, nullptr);
-    libevdev_enable_event_code(uinput_base_dev, EV_KEY, BTN_RIGHT, nullptr);
-    libevdev_enable_event_code(uinput_base_dev, EV_KEY, BTN_MIDDLE, nullptr);
+    libevdev_enable_event_code(uinput_template_dev, EV_KEY, KEY_LEFTSHIFT, nullptr);
+    libevdev_enable_event_code(uinput_template_dev, EV_KEY, KEY_RIGHTSHIFT, nullptr);
+    libevdev_enable_event_code(uinput_template_dev, EV_KEY, KEY_LEFTCTRL, nullptr);
+    libevdev_enable_event_code(uinput_template_dev, EV_KEY, KEY_RIGHTCTRL, nullptr);
+    libevdev_enable_event_code(uinput_template_dev, EV_KEY, KEY_LEFTALT, nullptr);
+    libevdev_enable_event_code(uinput_template_dev, EV_KEY, KEY_RIGHTALT, nullptr);
+    libevdev_enable_event_code(uinput_template_dev, EV_KEY, KEY_LEFTMETA, nullptr);
+    libevdev_enable_event_code(uinput_template_dev, EV_KEY, KEY_RIGHTMETA, nullptr);
 
 
-    int uinput_err = libevdev_uinput_create_from_device(uinput_base_dev, LIBEVDEV_UINPUT_OPEN_MANAGED, &g_uinput_device);
-    libevdev_free(uinput_base_dev);
+    libevdev_enable_event_code(uinput_template_dev, EV_KEY, BTN_LEFT, nullptr);
+    libevdev_enable_event_code(uinput_template_dev, EV_KEY, BTN_RIGHT, nullptr);
+    libevdev_enable_event_code(uinput_template_dev, EV_KEY, BTN_MIDDLE, nullptr);
+    libevdev_enable_event_code(uinput_template_dev, EV_KEY, BTN_SIDE, nullptr);
+    libevdev_enable_event_code(uinput_template_dev, EV_KEY, BTN_EXTRA, nullptr);
 
+
+    libevdev_enable_event_type(uinput_template_dev, EV_REL);
+    libevdev_enable_event_code(uinput_template_dev, EV_REL, REL_X, nullptr);
+    libevdev_enable_event_code(uinput_template_dev, EV_REL, REL_Y, nullptr);
+    libevdev_enable_event_code(uinput_template_dev, EV_REL, REL_WHEEL, nullptr);
+    libevdev_enable_event_code(uinput_template_dev, EV_REL, REL_HWHEEL, nullptr);
+
+    libevdev_enable_event_type(uinput_template_dev, EV_ABS);
+    struct input_absinfo abs_info_x_virt = {0}, abs_info_y_virt = {0};
+    abs_info_x_virt.minimum = 0;
+    abs_info_x_virt.maximum = g_client_screen_width > 0 ? g_client_screen_width - 1 : 1919;
+    libevdev_enable_event_code(uinput_template_dev, EV_ABS, ABS_X, &abs_info_x_virt);
+
+    abs_info_y_virt.minimum = 0;
+    abs_info_y_virt.maximum = g_client_screen_height > 0 ? g_client_screen_height - 1 : 1079;
+    libevdev_enable_event_code(uinput_template_dev, EV_ABS, ABS_Y, &abs_info_y_virt);
+    
+    libevdev_enable_property(uinput_template_dev, INPUT_PROP_POINTER);
+    
+    int uinput_err = libevdev_uinput_create_from_device(uinput_template_dev, 
+                                                      LIBEVDEV_UINPUT_OPEN_MANAGED, &g_uinput_device);
+    libevdev_free(uinput_template_dev);
     if (uinput_err != 0) {
         LT::Utils::Logger::GetInstance().Error("Input Helper: Failed to create uinput device: " + std::string(strerror(-uinput_err)));
-        g_uinput_device = nullptr;
+        return false;
     }
+    LT::Utils::Logger::GetInstance().Info("Input Helper: uinput device created.");
     return true;
 }
-std::vector<uint8_t> serializeInputPayload(const LocalTether::Network::InputPayload& payload) {
-    std::vector<uint8_t> buffer;
 
-    //its gonna equal 10 bytes, but just to make modular and easy later
-    size_t fixedSize = sizeof(payload.isMouseEvent) +
-                       sizeof(payload.deltaX) +
-                       sizeof(payload.deltaY) +
-                       sizeof(payload.mouseButtons) +
-                       sizeof(payload.scrollDeltaX) +
-                       sizeof(payload.scrollDeltaY);
 
-    size_t keyEventsCountSize = sizeof(uint32_t);
-    size_t keyEventsDataSize = payload.keyEvents.size() * sizeof(LocalTether::Network::KeyEvent);
-
-    buffer.resize(fixedSize + keyEventsCountSize + keyEventsDataSize);
-
-    size_t offset = 0;
-
-    memcpy(buffer.data() + offset, &payload.isMouseEvent, sizeof(payload.isMouseEvent));
-    offset += sizeof(payload.isMouseEvent);
-
-    memcpy(buffer.data() + offset, &payload.deltaX, sizeof(payload.deltaX));
-    offset += sizeof(payload.deltaX);
-
-    memcpy(buffer.data() + offset, &payload.deltaY, sizeof(payload.deltaY));
-    offset += sizeof(payload.deltaY);
-
-    memcpy(buffer.data() + offset, &payload.mouseButtons, sizeof(payload.mouseButtons));
-    offset += sizeof(payload.mouseButtons);
-
-    memcpy(buffer.data() + offset, &payload.scrollDeltaX, sizeof(payload.scrollDeltaX));
-    offset += sizeof(payload.scrollDeltaX);
-
-    memcpy(buffer.data() + offset, &payload.scrollDeltaY, sizeof(payload.scrollDeltaY));
-    offset += sizeof(payload.scrollDeltaY);
-
-    //serializing key counts so no sending vectors over the network
-    uint32_t keyEventsCount = static_cast<uint32_t>(payload.keyEvents.size());
-    memcpy(buffer.data() + offset, &keyEventsCount, sizeof(keyEventsCount));
-    offset += sizeof(keyEventsCount);
-
-    if (keyEventsCount > 0) {
-        memcpy(buffer.data() + offset, payload.keyEvents.data(), keyEventsDataSize);
-        offset += keyEventsDataSize;
+void poll_events_once_and_send(asio::local::stream_protocol::socket& target_socket) {
+    if (g_evdev_fds.empty() || g_input_polling_paused.load(std::memory_order_relaxed)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        return;
     }
 
-    return buffer;
-}
-
-void poll_and_send_input_events(asio::local::stream_protocol::socket& client_socket) {
-    if (!g_helper_running.load(std::memory_order_relaxed) || g_evdev_fds.empty()) {
-        usleep(10000); return;
-    }
     fd_set read_fds; FD_ZERO(&read_fds); int max_fd = 0;
     for (int fd : g_evdev_fds) { FD_SET(fd, &read_fds); if (fd > max_fd) max_fd = fd; }
-    struct timeval tv; tv.tv_sec = 0; tv.tv_usec = 20000;
+    struct timeval tv = {0, 20000};
+
     int ret = select(max_fd + 1, &read_fds, nullptr, nullptr, &tv);
     if (ret <= 0) return;
 
-    LT::Network::InputPayload current_payload; bool events_accumulated = false;
+    LT::Network::InputPayload current_payload; 
+    bool events_accumulated = false;
+    bool raw_mouse_moved_this_cycle = false;
+    bool raw_mouse_button_changed_this_cycle = false;
+
+    if (!g_helper_mouse_state_initialized && g_client_screen_width > 0 && g_client_screen_height > 0) {
+        g_helper_abs_x = g_client_screen_width / 2;
+        g_helper_abs_y = g_client_screen_height / 2;
+        g_helper_last_sent_abs_x = g_helper_abs_x;
+        g_helper_last_sent_abs_y = g_helper_abs_y;
+        g_helper_mouse_state_initialized = true;
+    }
+
     for (size_t i = 0; i < g_evdev_fds.size(); ++i) {
         if (FD_ISSET(g_evdev_fds[i], &read_fds)) {
-            struct libevdev* dev = g_evdev_devices[i]; struct input_event ev; int rc;
-            while ((rc = libevdev_next_event(dev, LIBEVDEV_READ_FLAG_NORMAL, &ev)) >= 0) {
-                if (rc == LIBEVDEV_READ_STATUS_SYNC) continue;
-                if (g_input_stream_paused.load(std::memory_order_relaxed)) {
-                    if (ev.type == EV_SYN && ev.code == SYN_REPORT) events_accumulated = false; // Reset on pause
-                    continue;
-                }
+            struct input_event ev;
+            int rc;
+            int current_fd = g_evdev_fds[i];
+
+            g_pending_abs_x_for_fd[current_fd] = std::nullopt;
+            g_pending_abs_y_for_fd[current_fd] = std::nullopt;
+
+            while ((rc = libevdev_next_event(g_evdev_devices[i], LIBEVDEV_READ_FLAG_NORMAL, &ev)) == LIBEVDEV_READ_STATUS_SUCCESS) {
+                events_accumulated = true;
+
                 if (ev.type == EV_KEY) {
                     uint8_t vk_code = LT::Utils::KeycodeConverter::evdevToVk(ev.code);
-                    if (vk_code != 0) { current_payload.keyEvents.push_back({vk_code, (ev.value == 1 || ev.value == 2)}); events_accumulated = true; }
+                    bool is_touch_pointer_dev = g_device_is_touch_pointer.count(current_fd) && g_device_is_touch_pointer[current_fd];
+                    bool event_is_pressed_state = (ev.value == 1 || ev.value == 2);
+
+                    if (is_touch_pointer_dev && ev.code == BTN_TOUCH) {
+                        if (event_is_pressed_state) {
+                            g_device_touch_is_active[current_fd] = true;
+                            g_device_initial_raw_abs_at_touch_start[current_fd] = std::nullopt;
+                            g_device_screen_coords_at_touch_start[current_fd] = {g_helper_abs_x, g_helper_abs_y};
+                            LT::Utils::Logger::GetInstance().Debug("Input Helper: BTN_TOUCH down on fd " + std::to_string(current_fd) + ". Screen anchor: (" + std::to_string(g_helper_abs_x) + "," + std::to_string(g_helper_abs_y) + ")");
+                        } else {
+                            g_device_touch_is_active[current_fd] = false;
+                            LT::Utils::Logger::GetInstance().Debug("Input Helper: BTN_TOUCH up on fd " + std::to_string(current_fd));
+                        }
+                    } else if (vk_code != 0) {
+                        bool currently_pressed_in_helper_state = is_helper_vk_key_pressed(vk_code);
+                        if (event_is_pressed_state && !currently_pressed_in_helper_state) {
+                            current_payload.keyEvents.push_back({vk_code, true});
+                            update_helper_vk_key_state(vk_code, true);
+                        } else if (!event_is_pressed_state && currently_pressed_in_helper_state) {
+                            current_payload.keyEvents.push_back({vk_code, false});
+                            update_helper_vk_key_state(vk_code, false);
+                        }
+                        
+                        uint8_t old_buttons = g_helper_mouse_buttons_state;
+                        if (ev.code == BTN_LEFT) { if (event_is_pressed_state) g_helper_mouse_buttons_state |= 0x01; else g_helper_mouse_buttons_state &= ~0x01; }
+                        else if (ev.code == BTN_RIGHT) { if (event_is_pressed_state) g_helper_mouse_buttons_state |= 0x02; else g_helper_mouse_buttons_state &= ~0x02; }
+                        else if (ev.code == BTN_MIDDLE) { if (event_is_pressed_state) g_helper_mouse_buttons_state |= 0x04; else g_helper_mouse_buttons_state &= ~0x04; }
+                        if (old_buttons != g_helper_mouse_buttons_state) {
+                            raw_mouse_button_changed_this_cycle = true;
+                        }
+                    }
                 } else if (ev.type == EV_REL) {
-                    printf("Mouse move: code : %d, value = %d\n",ev.code,ev.value);
-                    current_payload.isMouseEvent = true;
-                    if (ev.code == REL_X) current_payload.deltaX += static_cast<int16_t>(ev.value);
-                    else if (ev.code == REL_Y) current_payload.deltaY += static_cast<int16_t>(ev.value);
-                    else if (ev.code == REL_WHEEL) current_payload.scrollDeltaY += static_cast<int16_t>(ev.value);
-                    else if (ev.code == REL_HWHEEL) current_payload.scrollDeltaX += static_cast<int16_t>(ev.value);
-                    events_accumulated = true;
-                } 
-                else if(ev.type == EV_ABS){
-                    if(ev.code == ABS_X || ev.code == ABS_MT_POSITION_X){
-                        if(last_abs_x >=0){
-                            int dx = ev.value - last_abs_x;
-                            if(std::abs(dx) >= DEADZONE){
-                                current_payload.deltaX += dx;
-                                events_accumulated = true;
-                                last_abs_x =ev.value;
+                    if (g_helper_mouse_state_initialized) {
+                        if (ev.code == REL_X) { g_helper_abs_x += ev.value; raw_mouse_moved_this_cycle = true; }
+                        else if (ev.code == REL_Y) { g_helper_abs_y += ev.value; raw_mouse_moved_this_cycle = true; }
+                    }
+                    if (ev.code == REL_WHEEL) { current_payload.scrollDeltaY += static_cast<int16_t>(ev.value); }
+                    else if (ev.code == REL_HWHEEL) { current_payload.scrollDeltaX += static_cast<int16_t>(ev.value); }
+
+                } else if (ev.type == EV_ABS) {
+                    if (g_helper_mouse_state_initialized) {
+                        bool is_touch_pointer_dev = g_device_is_touch_pointer.count(current_fd) && g_device_is_touch_pointer[current_fd];
+                        bool touch_is_active_for_dev = g_device_touch_is_active.count(current_fd) && g_device_touch_is_active[current_fd];
+
+                        if (is_touch_pointer_dev && touch_is_active_for_dev) {
+                            if (ev.code == ABS_X || (ev.code == ABS_MT_POSITION_X && g_abs_x_info_map.count(current_fd))) {
+                                g_pending_abs_x_for_fd[current_fd] = ev.value;
+                            } else if (ev.code == ABS_Y || (ev.code == ABS_MT_POSITION_Y && g_abs_y_info_map.count(current_fd))) {
+                                g_pending_abs_y_for_fd[current_fd] = ev.value;
                             }
-
-                        }
-
-                    }else if (ev.code == ABS_Y || ev.code || ABS_MT_POSITION_Y){
-                        if(last_abs_y >=0){
-                            int dy = ev.value - last_abs_y;
-                            if(std::abs(dy) >= DEADZONE){
-                                current_payload.deltaY += dy;
-                                events_accumulated = true;
-                                last_abs_y =ev.value;
+                        } else {
+                            if (ev.code == ABS_X || (ev.code == ABS_MT_POSITION_X && g_abs_x_info_map.count(current_fd))) {
+                                 const auto it = g_abs_x_info_map.find(current_fd);
+                                 if (it != g_abs_x_info_map.end()) {
+                                    g_helper_abs_x = scale_abs_value_to_screen(ev.value, &it->second, g_client_screen_width);
+                                    raw_mouse_moved_this_cycle = true;
+                                 }
+                            } else if (ev.code == ABS_Y || (ev.code == ABS_MT_POSITION_Y && g_abs_y_info_map.count(current_fd))) {
+                                const auto it = g_abs_y_info_map.find(current_fd);
+                                if (it != g_abs_y_info_map.end()) {
+                                    g_helper_abs_y = scale_abs_value_to_screen(ev.value, &it->second, g_client_screen_height);
+                                    raw_mouse_moved_this_cycle = true;
+                                }
                             }
-
-                        }
-
-                    }else if (ev.code == ABS_WHEEL){
-                        int dy = ev.value - last_scroll_y;
-                        if(std::abs(dy) >= DEADZONE){
-                            current_payload.scrollDeltaY += dy;
-                            events_accumulated = true;
-                            last_scroll_y =ev.value;
-                        }
-
-
-
-                    }else if (ev.code == ABS_THROTTLE){
-                        int dx = ev.value - last_scroll_x;
-                        if(std::abs(dx) >= DEADZONE){
-                            current_payload.scrollDeltaX += dx;
-                            events_accumulated = true;
-                            last_scroll_x =ev.value;
                         }
                     }
-
                 }
-                else if (ev.type == EV_SYN && ev.code == SYN_REPORT) {
-                    if (events_accumulated) {
-                        current_payload.isMouseEvent = true;
-                        std::vector<uint8_t> buffer = serializeInputPayload(current_payload);
+
+                if (ev.type == EV_SYN && ev.code == SYN_REPORT && events_accumulated) {
+                    bool is_touch_pointer_dev = g_device_is_touch_pointer.count(current_fd) && g_device_is_touch_pointer[current_fd];
+                    bool touch_is_active_for_dev = g_device_touch_is_active.count(current_fd) && g_device_touch_is_active[current_fd];
+
+                    if (is_touch_pointer_dev && touch_is_active_for_dev &&
+                        g_pending_abs_x_for_fd.count(current_fd) && g_pending_abs_x_for_fd[current_fd].has_value() &&
+                        g_pending_abs_y_for_fd.count(current_fd) && g_pending_abs_y_for_fd[current_fd].has_value()) {
+                        
+                        int32_t current_raw_dev_x = g_pending_abs_x_for_fd[current_fd].value();
+                        int32_t current_raw_dev_y = g_pending_abs_y_for_fd[current_fd].value();
+
+                        if (!g_device_initial_raw_abs_at_touch_start[current_fd].has_value()) {
+                            g_device_initial_raw_abs_at_touch_start[current_fd] = {current_raw_dev_x, current_raw_dev_y};
+                            LT::Utils::Logger::GetInstance().Debug("Input Helper: Touch Start Synced. Device fd " + std::to_string(current_fd) + " raw (" + std::to_string(current_raw_dev_x) + "," + std::to_string(current_raw_dev_y) + "). Cursor at (" + std::to_string(g_helper_abs_x) + "," + std::to_string(g_helper_abs_y) + ")");
+                        } else {
+                            int32_t initial_raw_x = g_device_initial_raw_abs_at_touch_start[current_fd]->first;
+                            int32_t initial_raw_y = g_device_initial_raw_abs_at_touch_start[current_fd]->second;
+
+                            int32_t raw_delta_x = current_raw_dev_x - initial_raw_x;
+                            int32_t raw_delta_y = current_raw_dev_y - initial_raw_y;
+
+                            double screen_delta_x = 0.0, screen_delta_y = 0.0;
+                            const auto& abs_x_info = g_abs_x_info_map[current_fd];
+                            const auto& abs_y_info = g_abs_y_info_map[current_fd];
+
+                            if (abs_x_info.maximum > abs_x_info.minimum && (g_client_screen_width -1) > 0) {
+                                screen_delta_x = static_cast<double>(raw_delta_x) /
+                                                   (abs_x_info.maximum - abs_x_info.minimum) *
+                                                   (g_client_screen_width - 1);
+                            }
+                            if (abs_y_info.maximum > abs_y_info.minimum && (g_client_screen_height -1) > 0) {
+                                screen_delta_y = static_cast<double>(raw_delta_y) /
+                                                   (abs_y_info.maximum - abs_y_info.minimum) *
+                                                   (g_client_screen_height - 1);
+                            }
+                            
+                            if (g_device_screen_coords_at_touch_start[current_fd].has_value()) {
+                                g_helper_abs_x = g_device_screen_coords_at_touch_start[current_fd]->first + static_cast<int32_t>(screen_delta_x);
+                                g_helper_abs_y = g_device_screen_coords_at_touch_start[current_fd]->second + static_cast<int32_t>(screen_delta_y);
+                                raw_mouse_moved_this_cycle = true;
+                            }
+                        }
+                    }
+                    g_pending_abs_x_for_fd[current_fd] = std::nullopt;
+                    g_pending_abs_y_for_fd[current_fd] = std::nullopt;
+
+                    if (raw_mouse_moved_this_cycle && g_helper_mouse_state_initialized) {
+                        g_helper_abs_x = std::max(0, std::min(g_helper_abs_x, static_cast<int32_t>(g_client_screen_width - 1)));
+                        g_helper_abs_y = std::max(0, std::min(g_helper_abs_y, static_cast<int32_t>(g_client_screen_height - 1)));
+                    }
+
+                    bool mouse_moved_significantly_this_report = false;
+                    if (raw_mouse_moved_this_cycle && g_helper_mouse_state_initialized) {
+                        int dx = g_helper_abs_x - g_helper_last_sent_abs_x;
+                        int dy = g_helper_abs_y - g_helper_last_sent_abs_y;
+                        if ((dx * dx + dy * dy) >= HELPER_MOUSE_DEADZONE_SQUARED) {
+                            mouse_moved_significantly_this_report = true;
+                        }
+                    }
+                    
+                    bool mouse_buttons_changed_this_report = raw_mouse_button_changed_this_cycle;
+                    bool send_mouse_update_this_report = mouse_moved_significantly_this_report || mouse_buttons_changed_this_report;
+                    
+                    bool key_event_is_mouse_button = false;
+                    for(const auto& ke : current_payload.keyEvents) {
+                        if (LT::Utils::KeycodeConverter::isVkMouseButton(ke.keyCode)) {
+                            key_event_is_mouse_button = true; break;
+                        }
+                    }
+                    
+                    current_payload.isMouseEvent = (current_payload.scrollDeltaX != 0 || current_payload.scrollDeltaY != 0 ||
+                                                    send_mouse_update_this_report || key_event_is_mouse_button);
+
+                    if (send_mouse_update_this_report && g_helper_mouse_state_initialized && g_client_screen_width > 0 && g_client_screen_height > 0) {
+                        current_payload.relativeX = static_cast<float>(g_helper_abs_x) / std::max(1, (g_client_screen_width -1));
+                        current_payload.relativeY = static_cast<float>(g_helper_abs_y) / std::max(1, (g_client_screen_height-1));
+                        current_payload.relativeX = std::max(0.0f, std::min(1.0f, current_payload.relativeX));
+                        current_payload.relativeY = std::max(0.0f, std::min(1.0f, current_payload.relativeY));
+                        
+                        g_helper_last_sent_abs_x = g_helper_abs_x;
+                        g_helper_last_sent_abs_y = g_helper_abs_y;
+                    }
+                    if (current_payload.isMouseEvent) {
+                         current_payload.mouseButtons = g_helper_mouse_buttons_state;
+                    }
+                    if (mouse_buttons_changed_this_report) {
+                        g_helper_last_sent_mouse_buttons = g_helper_mouse_buttons_state;
+                    }
+
+                    if (!current_payload.keyEvents.empty() || current_payload.isMouseEvent) {
+                        std::vector<uint8_t> buffer = LT::Utils::serializeInputPayload(current_payload);
                         asio::error_code ec_write;
-                        asio::write(client_socket, asio::buffer(buffer), ec_write);
-                        if (ec_write) { g_helper_running = false; return; }
-                        current_payload = LT::Network::InputPayload(); events_accumulated = false;
+                        size_t bytes_written = asio::write(target_socket, asio::buffer(buffer), ec_write);
+                        if (ec_write) {
+                            LT::Utils::Logger::GetInstance().Error("Input Helper: IPC write error: " + ec_write.message() + ". Bytes written: " + std::to_string(bytes_written));
+                            g_helper_running = false; return;
+                        }
                     }
+                    
+                    current_payload = LT::Network::InputPayload(); 
+                    events_accumulated = false;
+                    raw_mouse_moved_this_cycle = false;
+                    raw_mouse_button_changed_this_cycle = false;
                 }
+            }
+            if (rc == LIBEVDEV_READ_STATUS_SYNC) { }
+            else if (rc != LIBEVDEV_READ_STATUS_SUCCESS && rc != -EAGAIN) {
+                LT::Utils::Logger::GetInstance().Warning("Input Helper: libevdev_next_event error on fd " + std::to_string(current_fd) + ": " + strerror(-rc));
             }
         }
     }
 }
-void simulate_input_event(const LT::Network::InputPayload& payload_to_simulate) {
-    if (!g_uinput_device) return;
-    for (const auto& keyEvent : payload_to_simulate.keyEvents) {
+
+void simulate_input_event(const LT::Network::InputPayload& payload) {
+    if (!g_uinput_device) {
+        LT::Utils::Logger::GetInstance().Warning("Simulating: uinput device not available.");
+        return;
+    }
+
+    for (const auto& keyEvent : payload.keyEvents) {
         uint16_t evdev_code = LT::Utils::KeycodeConverter::vkToEvdev(keyEvent.keyCode);
-        if (evdev_code != 0) libevdev_uinput_write_event(g_uinput_device, EV_KEY, evdev_code, keyEvent.isPressed ? 1 : 0);
+        if (evdev_code != 0) {
+            LT::Utils::Logger::GetInstance().Debug("Simulating: vk_code: " + LT::Utils::Logger::getKeyName(keyEvent.keyCode) + " (" + std::to_string(keyEvent.keyCode) + ")" + " -> evdev_code: " + std::to_string(evdev_code) + (keyEvent.isPressed ? " Pressed" : " Released"));
+            libevdev_uinput_write_event(g_uinput_device, EV_KEY, evdev_code, keyEvent.isPressed ? 1 : 0);
+        } else {
+            LT::Utils::Logger::GetInstance().Warning("Simulating: No evdev_code for vk_code: " + LT::Utils::Logger::getKeyName(keyEvent.keyCode) + " (" + std::to_string(keyEvent.keyCode) + ")");
+        }
     }
-    if (payload_to_simulate.isMouseEvent) {
-        if (payload_to_simulate.deltaX != 0) libevdev_uinput_write_event(g_uinput_device, EV_REL, REL_X, payload_to_simulate.deltaX);
-        if (payload_to_simulate.deltaY != 0) libevdev_uinput_write_event(g_uinput_device, EV_REL, REL_Y, payload_to_simulate.deltaY);
-        if (payload_to_simulate.scrollDeltaY != 0) libevdev_uinput_write_event(g_uinput_device, EV_REL, REL_WHEEL, payload_to_simulate.scrollDeltaY);
-        if (payload_to_simulate.scrollDeltaX != 0) libevdev_uinput_write_event(g_uinput_device, EV_REL, REL_HWHEEL, payload_to_simulate.scrollDeltaX);
+
+    if (payload.isMouseEvent && payload.relativeX != -1.0f && payload.relativeY != -1.0f) {
+        if (g_client_screen_width > 0 && g_client_screen_height > 0) {
+            int32_t target_abs_x = static_cast<int32_t>(payload.relativeX * (g_client_screen_width -1) );
+            int32_t target_abs_y = static_cast<int32_t>(payload.relativeY * (g_client_screen_height -1));
+
+            target_abs_x = std::max(0, std::min(target_abs_x, static_cast<int32_t>(g_client_screen_width - 1)));
+            target_abs_y = std::max(0, std::min(target_abs_y, static_cast<int32_t>(g_client_screen_height - 1)));
+            
+            LT::Utils::Logger::GetInstance().Debug("Simulating: Relative (" + std::to_string(payload.relativeX) + "," + std::to_string(payload.relativeY) + ") -> Absolute (" + std::to_string(target_abs_x) + "," + std::to_string(target_abs_y) + ") for screen " + std::to_string(g_client_screen_width) + "x" + std::to_string(g_client_screen_height));
+
+            libevdev_uinput_write_event(g_uinput_device, EV_ABS, ABS_X, target_abs_x);
+            libevdev_uinput_write_event(g_uinput_device, EV_ABS, ABS_Y, target_abs_y);
+        } else {
+            LT::Utils::Logger::GetInstance().Warning("Simulating: Screen dimensions unknown in helper, cannot scale relative mouse move.");
+        }
     }
+    
+    if (payload.scrollDeltaY != 0) {
+        libevdev_uinput_write_event(g_uinput_device, EV_REL, REL_WHEEL, payload.scrollDeltaY);
+    }
+    if (payload.scrollDeltaX != 0) {
+        libevdev_uinput_write_event(g_uinput_device, EV_REL, REL_HWHEEL, payload.scrollDeltaX);
+    }
+
     libevdev_uinput_write_event(g_uinput_device, EV_SYN, SYN_REPORT, 0);
 }
-void handle_ipc_command(const char* data, size_t length) {
-    if (length == 0) return; uint8_t command_type = static_cast<uint8_t>(data[0]);
-    if (command_type == 1) { // SimulateInput
-        if (length -1 >= sizeof(LT::Network::InputPayload)) {
-            LT::Network::InputPayload payload_to_simulate;
-            memcpy(&payload_to_simulate, data + 1, sizeof(LT::Network::InputPayload));
-            simulate_input_event(payload_to_simulate);
+
+void handle_ipc_command(const char* data, size_t length, asio::local::stream_protocol::socket& source_socket) {
+    if (length == 0) return;
+    IPCCommandType command_type = static_cast<IPCCommandType>(data[0]);
+
+    switch (command_type) {
+        case IPCCommandType::SimulateInput: {
+            if (length > 1) {
+                auto payload_opt = LT::Utils::deserializeInputPayload(reinterpret_cast<const uint8_t*>(data + 1), length - 1);
+                if (payload_opt) simulate_input_event(*payload_opt);
+                else LT::Utils::Logger::GetInstance().Warning("Input Helper: Failed to deserialize SimulateInput payload.");
+            }
+            break;
         }
-    } else if (command_type == 2) { g_input_stream_paused = true; } // Pause
-    else if (command_type == 3) { g_input_stream_paused = false; } // Resume
+        case IPCCommandType::PauseStream:
+            g_input_polling_paused = true;
+            LT::Utils::Logger::GetInstance().Info("Input Helper: Input polling PAUSED.");
+            break;
+        case IPCCommandType::ResumeStream:
+            g_input_polling_paused = false;
+            LT::Utils::Logger::GetInstance().Info("Input Helper: Input polling RESUMED.");
+            break;
+        case IPCCommandType::Shutdown:
+            LT::Utils::Logger::GetInstance().Info("Input Helper: Shutdown command received.");
+            g_helper_running = false;
+            if (g_ipc_io_context_ptr) g_ipc_io_context_ptr->stop();
+            if (source_socket.is_open()) { asio::error_code ec; source_socket.close(ec); }
+            break;
+        default:
+            LT::Utils::Logger::GetInstance().Warning("Input Helper: Unknown IPC command: " + std::to_string(static_cast<int>(command_type)));
+            break;
+    }
 }
 
-
-int runInputHelperMode(int argc, char ** argv) {
-    if(argc < 4){
-        LT::Utils::Logger::GetInstance().Error("Input Helper: insufficient arguements");
+int runInputHelperMode(int argc, char **argv) {
+    if (argc < 6) {
+        std::cerr << "Input Helper ERROR: Insufficient arguments. Expected 6, got " << argc << std::endl;
         return 1;
     }
-    uid_t user_uid = static_cast<uid_t>(atoi(argv[2]));
-    const char * username = argv[3];
+    uid_t original_user_uid = static_cast<uid_t>(atoi(argv[2]));
+    const char *original_username = argv[3];
+    g_client_screen_width = atoi(argv[4]);
+    g_client_screen_height = atoi(argv[5]);
 
-    std::cout<<"now running input helper"<<std::endl;
-    LT::Utils::Logger::GetInstance().Info("--- Input Helper Mode Started (PID: " + std::to_string(getpid()) + ") ---");
+    LT::Utils::Logger::GetInstance().Info("--- Input Helper Mode Started (PID: " + std::to_string(getpid()) +
+                                         ", User: " + original_username + " (" + std::to_string(original_user_uid) + ")" +
+                                         ", Screen: " + std::to_string(g_client_screen_width) + "x" + std::to_string(g_client_screen_height) + ") ---");
 
-    if (!setup_shared_memory()) { // Setup shared memory first
-        LT::Utils::Logger::GetInstance().Error("Input Helper: Failed to setup shared memory. Exiting.");
-        return 1;
-    }
+    if (!setup_shared_memory()) { return 1; }
 
     signal(SIGINT, helper_signal_handler);
     signal(SIGTERM, helper_signal_handler);
-    signal(SIGPIPE, SIG_IGN); // Ignore SIGPIPE
+    signal(SIGHUP, helper_signal_handler);
+    signal(SIGPIPE, SIG_IGN);
 
     if (!initialize_input_devices()) {
-        LT::Utils::Logger::GetInstance().Error("Input Helper: Failed to initialize input devices.");
-        cleanup_helper_resources(); // This will also cleanup shared memory
-        return 1;
+        cleanup_helper_resources(); return 1;
     }
-    
-    G_ACTUAL_SOCKET_PATH = "/tmp/localtether_helper_socket_" + std::string(username) +"_" + std::to_string(user_uid) +  "_" + std::to_string(getpid());
 
+    G_ACTUAL_SOCKET_PATH = "/tmp/localtether_helper_" + std::string(original_username) + "_" + std::to_string(getpid());
 
-    asio::io_context io_context;
-    g_ipc_io_context_ptr = &io_context;
-    asio::local::stream_protocol::socket client_socket(io_context);
-    g_client_socket_ptr = &client_socket;
+    asio::io_context local_io_context;
+    g_ipc_io_context_ptr = &local_io_context;
+    asio::local::stream_protocol::socket main_app_socket(local_io_context);
+    g_main_app_socket_ptr = &main_app_socket;
 
-    std::thread input_polling_thread;
+    std::thread input_polling_thread_obj;
 
     try {
-        std::filesystem::remove(G_ACTUAL_SOCKET_PATH); // Clean up old socket if any
-        asio::local::stream_protocol::acceptor acceptor(io_context, asio::local::stream_protocol::endpoint(G_ACTUAL_SOCKET_PATH));
-        if(chown(G_ACTUAL_SOCKET_PATH.c_str(), user_uid, -1) == -1){
+        std::filesystem::remove(G_ACTUAL_SOCKET_PATH);
+        asio::local::stream_protocol::acceptor acceptor(local_io_context, asio::local::stream_protocol::endpoint(G_ACTUAL_SOCKET_PATH));
 
-            LT::Utils::Logger::GetInstance().Error("INput helper: failed to change ownership: " + std::string(strerror(errno)));
+        if (getuid() == 0 && original_user_uid != 0) {
+            struct passwd *pw = getpwuid(original_user_uid);
+            if (pw) {
+                if (chown(G_ACTUAL_SOCKET_PATH.c_str(), original_user_uid, pw->pw_gid) == -1) {
+                    LT::Utils::Logger::GetInstance().Warning("Input Helper: chown socket to " + std::to_string(original_user_uid) + " failed: " + strerror(errno));
+                }else{
+                    LT::Utils::Logger::GetInstance().Info("Input Helper: Socket ownership changed to " + std::string(pw->pw_name) + " (" + std::to_string(original_user_uid) + ")");
+                }
+            }
+        }
+        
+        if (chmod(G_ACTUAL_SOCKET_PATH.c_str(), S_IRWXU | S_IRWXG | S_IRWXO) == -1) {
+             LT::Utils::Logger::GetInstance().Warning("Input Helper: chmod socket failed: " + std::string(strerror(errno)));
         }else{
-            LT::Utils::Logger::GetInstance().Info("Input helper: successfully changed owner ship to " +std::to_string(user_uid));
+            LT::Utils::Logger::GetInstance().Info("Input Helper: Socket permissions set to 0777.");
         }
 
-        chmod(G_ACTUAL_SOCKET_PATH.c_str(), 0777); // Make socket accessible
-
         LT::Utils::Logger::GetInstance().Info("Input Helper: Listening on " + G_ACTUAL_SOCKET_PATH);
-        
-        // Now that socket is ready, write info to shared memory
         write_info_to_shared_memory();
 
-        acceptor.accept(client_socket);
+        acceptor.accept(main_app_socket);
         LT::Utils::Logger::GetInstance().Info("Input Helper: Main application connected.");
-        acceptor.close(); // Stop accepting new connections
+        acceptor.close();
 
-        input_polling_thread = std::thread([&client_socket]() {
+        input_polling_thread_obj = std::thread([&main_app_socket]() {
             LT::Utils::Logger::GetInstance().Info("Input Helper: Input polling thread started.");
             while (g_helper_running.load(std::memory_order_relaxed)) {
-                poll_and_send_input_events(client_socket);
+                poll_events_once_and_send(main_app_socket);
             }
             LT::Utils::Logger::GetInstance().Info("Input Helper: Input polling thread finished.");
         });
 
-        std::array<char, 2048> ipc_read_buffer;
+        std::array<char, 2048> ipc_read_buffer_local;
         while (g_helper_running.load(std::memory_order_relaxed)) {
             asio::error_code error;
-            size_t length = client_socket.read_some(asio::buffer(ipc_read_buffer), error);
+            size_t length = main_app_socket.read_some(asio::buffer(ipc_read_buffer_local), error);
+            if (!g_helper_running) break;
 
             if (error == asio::error::eof || error == asio::error::connection_reset) {
-                LT::Utils::Logger::GetInstance().Info("Input Helper: Main app disconnected (EOF/reset).");
+                LT::Utils::Logger::GetInstance().Info("Input Helper: Main app disconnected.");
                 g_helper_running = false; break;
             } else if (error) {
                 if (error != asio::error::operation_aborted) {
@@ -540,26 +762,27 @@ int runInputHelperMode(int argc, char ** argv) {
                 }
                 g_helper_running = false; break;
             }
-            handle_ipc_command(ipc_read_buffer.data(), length);
+            if (length > 0) {
+                handle_ipc_command(ipc_read_buffer_local.data(), length, main_app_socket);
+            }
         }
     } catch (const std::exception& e) {
         LT::Utils::Logger::GetInstance().Error("Input Helper: Exception: " + std::string(e.what()));
         g_helper_running = false;
     }
 
-    g_helper_running = false; // Ensure flag is set for threads to exit
+    g_helper_running = false;
     if (g_ipc_io_context_ptr && !g_ipc_io_context_ptr->stopped()) {
-         g_ipc_io_context_ptr->stop(); // Stop io_context to unblock read_some
+         g_ipc_io_context_ptr->stop();
+    }
+    if (input_polling_thread_obj.joinable()) {
+        input_polling_thread_obj.join();
     }
 
-    if (input_polling_thread.joinable()) {
-        input_polling_thread.join();
-    }
-
-    cleanup_helper_resources(); // This will also cleanup shared memory
+    cleanup_helper_resources();
     LT::Utils::Logger::GetInstance().Info("--- Input Helper Mode Terminated ---");
     return 0;
 }
 
-} // namespace LocalTether::Input
-#endif // !_WIN32
+}
+#endif

@@ -116,6 +116,8 @@ void Server::doAccept() {
         });
 }
 
+
+
 void Server::handleMessage(std::shared_ptr<Session> session, const Message& message) {
     LocalTether::Utils::Logger::GetInstance().Debug(
         "Received message from: " + session->getClientAddress() + 
@@ -129,6 +131,53 @@ void Server::handleMessage(std::shared_ptr<Session> session, const Message& mess
         }
             
         case MessageType::Input: {
+
+            try {
+            auto payload = message.getInputPayload();
+            
+            // Log key events
+            if (!payload.keyEvents.empty()) {
+                std::string keyLog = "Input from " + session->getClientName() + " (" + std::to_string(session->getClientId()) + "): ";
+                
+                for (const auto& keyEvent : payload.keyEvents) {
+                    keyLog += std::string(keyEvent.isPressed ? "PRESS " : "RELEASE ") + 
+                              "VK:" + std::to_string(keyEvent.keyCode) + " ";
+                    
+                    // Optionally convert VK code to human-readable name for common keys
+                    keyLog +=  LocalTether::Utils::Logger::getKeyName(keyEvent.keyCode) + " ";
+                }
+                
+                LocalTether::Utils::Logger::GetInstance().Info(keyLog);
+            }
+            
+            // Log mouse events
+            if (payload.isMouseEvent) {
+                std::string mouseLog = "Mouse from " + session->getClientName() + ": ";
+                
+                if (payload.relativeX != 0 || payload.relativeY != 0) {
+                    mouseLog += "Move(" + std::to_string(payload.relativeX) + "," + 
+                               std::to_string(payload.relativeY) + ") ";
+                }
+                
+                if (payload.scrollDeltaX != 0 || payload.scrollDeltaY != 0) {
+                    mouseLog += "Scroll(" + std::to_string(payload.scrollDeltaX) + "," + 
+                               std::to_string(payload.scrollDeltaY) + ") ";
+                }
+                
+                if (payload.mouseButtons != 0) {
+                    mouseLog += "Buttons: ";
+                    if (payload.mouseButtons & 0x01) mouseLog += "Left ";
+                    if (payload.mouseButtons & 0x02) mouseLog += "Right ";
+                    if (payload.mouseButtons & 0x04) mouseLog += "Middle ";
+                    if (payload.mouseButtons & 0x08) mouseLog += "X1 ";
+                    if (payload.mouseButtons & 0x10) mouseLog += "X2 ";
+                }
+                
+                LocalTether::Utils::Logger::GetInstance().Info(mouseLog);
+            }
+        } catch (const std::exception& e) {
+            LocalTether::Utils::Logger::GetInstance().Error("Failed to parse input payload: " + std::string(e.what()));
+        }
             
             if (session->getClientId() == hostClientId_ && hostClientId_ != 0) {
                 
@@ -200,6 +249,8 @@ void Server::processHandshake(std::shared_ptr<Session> session, const Message& m
             if (handshakeData.role == ClientRole::Host) {
                 if (hostClientId_ == 0) {
                     hostClientId_ = session->getClientId();
+                    hostScreenWidth_ = handshakeData.hostScreenWidth; 
+                    hostScreenHeight_ = handshakeData.hostScreenHeight;
                     LocalTether::Utils::Logger::GetInstance().Info(
                         "Client " + handshakeData.clientName + " (ID: " + std::to_string(session->getClientId()) + ") designated as Host.");
                 } else if (hostClientId_ != session->getClientId()) {
@@ -209,13 +260,15 @@ void Server::processHandshake(std::shared_ptr<Session> session, const Message& m
                 }
             }
 
-            auto response = Message::createHandshake(
-                session->getRole(),
-                "Server",          
-                "",              
-                session->getClientId() 
-            );
-            session->send(response);
+            HandshakePayload responsePayload;
+            responsePayload.role = session->getRole(); 
+            responsePayload.clientName = "Server"; 
+
+            responsePayload.hostScreenWidth = (hostClientId_ != 0) ? hostScreenWidth_ : 0;
+            responsePayload.hostScreenHeight = (hostClientId_ != 0) ? hostScreenHeight_ : 0;
+
+            auto responseMsg = Message::createHandshake(responsePayload, session->getClientId());
+            session->send(responseMsg);
             
             LocalTether::Utils::Logger::GetInstance().Info(
                 handshakeData.clientName + " (ID: " + std::to_string(session->getClientId()) + 
@@ -240,13 +293,15 @@ void Server::processHandshake(std::shared_ptr<Session> session, const Message& m
 
 void Server::handleDisconnect(std::shared_ptr<Session> session) {
     if (!session) return;
-
+    
     LocalTether::Utils::Logger::GetInstance().Info(
         "Client disconnected: " + session->getClientAddress() + 
         " (ID: " + std::to_string(session->getClientId()) + 
         ", Name: " + session->getClientName() + ")");
 
     
+        session->close();
+
     if (session->getClientId() == hostClientId_) {
         LocalTether::Utils::Logger::GetInstance().Info(
             "Host (ID: " + std::to_string(hostClientId_) + ") has disconnected.");
@@ -274,6 +329,9 @@ void Server::broadcast(const Message& message) {
 }
 
 void Server::broadcastToReceivers(const Message& message) {
+    LocalTether::Utils::Logger::GetInstance().Debug(
+        "Broadcasting message to all receivers. Message type: " + 
+        std::to_string(static_cast<int>(message.getType())));
     std::vector<std::shared_ptr<Session>> currentSessions;
     {
         std::lock_guard<std::mutex> lock(sessions_mutex_);

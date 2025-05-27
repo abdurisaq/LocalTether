@@ -1,5 +1,6 @@
 #include "network/Message.h"
 #include "utils/Logger.h"
+#include "utils/Serialization.h"
 #include <cstring>
 #include <stdexcept>
 
@@ -12,45 +13,8 @@ Message::Message(MessageType type, uint32_t clientId, const std::vector<uint8_t>
     header.clientId = clientId;
 }
 
-Message Message::createInput(const std::vector<uint8_t>& inputData, uint32_t clientId) {
-    return Message(MessageType::Input, clientId, inputData);
-}
-
 Message Message::createInput(const InputPayload& inputPayload, uint32_t clientId) {
-    std::vector<uint8_t> data;
-
-    uint8_t flags = 0;
-    if (inputPayload.isMouseEvent) {
-        flags |= 0x01;
-    }
-    data.push_back(flags);
-
-    uint8_t numKeyEvents = static_cast<uint8_t>(inputPayload.keyEvents.size());
-    if (inputPayload.keyEvents.size() > 255) {
-        numKeyEvents = 255; 
-    }
-    data.push_back(numKeyEvents);
-
-    for (size_t i = 0; i < numKeyEvents; ++i) {
-        const auto& event = inputPayload.keyEvents[i];
-        data.push_back(event.keyCode);
-        data.push_back(event.isPressed ? 1 : 0);
-    }
-
-    if (inputPayload.isMouseEvent) {
-        
-        data.push_back(static_cast<uint8_t>((inputPayload.deltaX >> 8) & 0xFF));
-        data.push_back(static_cast<uint8_t>(inputPayload.deltaX & 0xFF));
-        data.push_back(static_cast<uint8_t>((inputPayload.deltaY >> 8) & 0xFF));
-        data.push_back(static_cast<uint8_t>(inputPayload.deltaY & 0xFF));
-        data.push_back(inputPayload.mouseButtons);
-        
-        data.push_back(static_cast<uint8_t>((inputPayload.scrollDeltaX >> 8) & 0xFF));
-        data.push_back(static_cast<uint8_t>(inputPayload.scrollDeltaX & 0xFF));
-        data.push_back(static_cast<uint8_t>((inputPayload.scrollDeltaY >> 8) & 0xFF));
-        data.push_back(static_cast<uint8_t>(inputPayload.scrollDeltaY & 0xFF));
-    }
-
+    std::vector<uint8_t> data = LocalTether::Utils::serializeInputPayload(inputPayload);
     return Message(MessageType::Input, clientId, data);
 }
 
@@ -60,53 +24,45 @@ HandshakePayload Message::getHandshakePayload() const {
     }
     
     HandshakePayload result;
+    size_t offset = 0;
 
-    // [role:1][nameLength:4][name][passwordLength:4][password]
-    
-    if (payload.size() < 1) {
-        throw std::runtime_error("Handshake payload too small");
-    }
-    
-    result.role = static_cast<ClientRole>(payload[0]);
-    
-    size_t offset = 1;
-    
-    if (payload.size() < offset + 4) {
-        throw std::runtime_error("Handshake payload too small for name length");
-    }
-    
+    if (payload.size() < offset + 1) throw std::runtime_error("Handshake payload too small for role");
+    result.role = static_cast<ClientRole>(payload[offset]);
+    offset += 1;
+
+    if (payload.size() < offset + sizeof(uint32_t)) throw std::runtime_error("Handshake payload too small for name length");
     uint32_t nameLength;
-    std::memcpy(&nameLength, payload.data() + offset, 4);
-    offset += 4;
-    
+    std::memcpy(&nameLength, payload.data() + offset, sizeof(uint32_t));
+    offset += sizeof(uint32_t);
 
-    if (payload.size() < offset + nameLength) {
-        throw std::runtime_error("Handshake payload too small for name");
-    }
-    
-    result.clientName = std::string(
-        reinterpret_cast<const char*>(payload.data() + offset), 
-        nameLength
-    );
+    if (payload.size() < offset + nameLength) throw std::runtime_error("Handshake payload too small for name");
+    result.clientName.assign(reinterpret_cast<const char*>(payload.data() + offset), nameLength);
     offset += nameLength;
-    
-    if (payload.size() < offset + 4) {
-        throw std::runtime_error("Handshake payload too small for password length");
-    }
-    
+
+    if (payload.size() < offset + sizeof(uint32_t)) throw std::runtime_error("Handshake payload too small for password length");
     uint32_t passwordLength;
-    std::memcpy(&passwordLength, payload.data() + offset, 4);
-    offset += 4;
+    std::memcpy(&passwordLength, payload.data() + offset, sizeof(uint32_t));
+    offset += sizeof(uint32_t);
+
+    if (payload.size() < offset + passwordLength) throw std::runtime_error("Handshake payload too small for password");
+    result.password.assign(reinterpret_cast<const char*>(payload.data() + offset), passwordLength);
+    offset += passwordLength;
+
     
-    if (payload.size() < offset + passwordLength) {
-        throw std::runtime_error("Handshake payload too small for password");
+    if (payload.size() < offset + sizeof(uint16_t)) { 
+        result.hostScreenWidth = 0;
+    } else {
+        std::memcpy(&result.hostScreenWidth, payload.data() + offset, sizeof(uint16_t));
+        offset += sizeof(uint16_t);
     }
-    
-    result.password = std::string(
-        reinterpret_cast<const char*>(payload.data() + offset), 
-        passwordLength
-    );
-    
+
+    if (payload.size() < offset + sizeof(uint16_t)) { // hostScreenHeight
+        result.hostScreenHeight = 0;
+    } else {
+        std::memcpy(&result.hostScreenHeight, payload.data() + offset, sizeof(uint16_t));
+        offset += sizeof(uint16_t);
+    }
+
     return result;
 }
 
@@ -121,49 +77,12 @@ InputPayload Message::getInputPayload() const {
         return p; 
     }
 
-    size_t offset = 0;
-
-    auto check_payload_size = [&](size_t needed, const char* field_name) {
-        if (offset + needed > payload.size()) {
-            throw std::runtime_error(std::string("Input payload too short for ") + field_name + 
-                                     ". Need " + std::to_string(needed) + 
-                                     ", have " + std::to_string(payload.size() - offset) + 
-                                     " at offset " + std::to_string(offset));
-        }
-    };
-
-    check_payload_size(1, "flags");
-    uint8_t flags = payload[offset++];
-    p.isMouseEvent = (flags & 0x01) != 0;
-
-    check_payload_size(1, "numKeyEvents");
-    uint8_t numKeyEvents = payload[offset++];
-
-    p.keyEvents.reserve(numKeyEvents);
-    for (uint8_t i = 0; i < numKeyEvents; ++i) {
-        check_payload_size(2, "KeyEvent data");
-        KeyEvent event;
-        event.keyCode = payload[offset++];
-        event.isPressed = (payload[offset++] != 0);
-        p.keyEvents.push_back(event);
+    auto result = LocalTether::Utils::deserializeInputPayload(payload.data(), payload.size());
+    if (!result) {
+        throw std::runtime_error("Failed to deserialize input payload");
     }
-
-    if (p.isMouseEvent) {
-        check_payload_size(5, "mouse data (deltas + buttons)"); // 2 for deltaX, 2 for deltaY, 1 forr buttons
-        p.deltaX = static_cast<int16_t>((static_cast<uint16_t>(payload[offset]) << 8) | payload[offset+1]);
-        offset += 2;
-        p.deltaY = static_cast<int16_t>((static_cast<uint16_t>(payload[offset]) << 8) | payload[offset+1]);
-        offset += 2;
-        p.mouseButtons = payload[offset++];
-
-        if (offset + 4 <= payload.size()) { 
-            p.scrollDeltaX = static_cast<int16_t>((static_cast<uint16_t>(payload[offset]) << 8) | payload[offset+1]);
-            offset += 2;
-            p.scrollDeltaY = static_cast<int16_t>((static_cast<uint16_t>(payload[offset]) << 8) | payload[offset+1]);
-            offset += 2;
-        }
-    }
-    return p;
+    
+    return *result;
 }
 
 Message Message::createChat(const std::string& text, uint32_t clientId) {
@@ -210,34 +129,22 @@ Message Message::createCommand(const std::string& command, uint32_t clientId) {
     return Message(MessageType::Command, clientId, data);
 }
 
-Message Message::createHandshake(ClientRole role, 
-                               const std::string& clientName,
-                               const std::string& password, 
-                               uint32_t clientId) {
-    // Format: [role:1][nameLength:4][name][passwordLength:4][password]
+Message Message::createHandshake(const HandshakePayload& payload, uint32_t clientId) {
     std::vector<uint8_t> data;
-    
+    data.push_back(static_cast<uint8_t>(payload.role));
 
-    data.push_back(static_cast<uint8_t>(role));
-    
+    uint32_t nameLength = static_cast<uint32_t>(payload.clientName.length());
+    data.insert(data.end(), reinterpret_cast<const uint8_t*>(&nameLength), reinterpret_cast<const uint8_t*>(&nameLength) + sizeof(nameLength));
+    data.insert(data.end(), payload.clientName.begin(), payload.clientName.end());
 
-    uint32_t nameLength = static_cast<uint32_t>(clientName.size());
-    size_t nameLengthPos = data.size();
-    data.resize(data.size() + 4);
-    std::memcpy(data.data() + nameLengthPos, &nameLength, 4);
-    
-    // Add client name
-    data.insert(data.end(), clientName.begin(), clientName.end());
-    
+    uint32_t passwordLength = static_cast<uint32_t>(payload.password.length());
+    data.insert(data.end(), reinterpret_cast<const uint8_t*>(&passwordLength), reinterpret_cast<const uint8_t*>(&passwordLength) + sizeof(passwordLength));
+    data.insert(data.end(), payload.password.begin(), payload.password.end());
 
-    uint32_t passwordLength = static_cast<uint32_t>(password.size());
-    size_t passwordLengthPos = data.size();
-    data.resize(data.size() + 4);
-    std::memcpy(data.data() + passwordLengthPos, &passwordLength, 4);
-    
+    // Serialize screen dimensions
+    data.insert(data.end(), reinterpret_cast<const uint8_t*>(&payload.hostScreenWidth), reinterpret_cast<const uint8_t*>(&payload.hostScreenWidth) + sizeof(payload.hostScreenWidth));
+    data.insert(data.end(), reinterpret_cast<const uint8_t*>(&payload.hostScreenHeight), reinterpret_cast<const uint8_t*>(&payload.hostScreenHeight) + sizeof(payload.hostScreenHeight));
 
-    data.insert(data.end(), password.begin(), password.end());
-    
     return Message(MessageType::Handshake, clientId, data);
 }
 

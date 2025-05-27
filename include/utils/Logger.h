@@ -28,6 +28,8 @@ namespace LocalTether::Utils {
        
         const std::vector<std::string>& GetLogs() const;
 
+        static std::string getKeyName(uint8_t vkCode);
+
         void Clear();
         
     private:
