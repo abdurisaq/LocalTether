@@ -1,6 +1,6 @@
 #include "ui/StyleManager.h"
 
-//default style im using, might actually customize later
+ 
 
 namespace LocalTether::UI {
     void StyleManager::SetupModernStyle()
@@ -8,7 +8,7 @@ namespace LocalTether::UI {
         ImGuiStyle& style = ImGui::GetStyle();
         ImVec4* colors = style.Colors;
 
-        //color scheme
+         
         ImVec4 text_color = ImVec4(0.95f, 0.95f, 0.95f, 1.00f);
         ImVec4 text_disabled = ImVec4(0.60f, 0.60f, 0.60f, 1.00f);
         ImVec4 bg_color = ImVec4(0.15f, 0.15f, 0.15f, 1.00f);
@@ -17,7 +17,7 @@ namespace LocalTether::UI {
         ImVec4 accent_hover = ImVec4(0.30f, 0.70f, 1.00f, 0.90f);
         ImVec4 accent_active = ImVec4(0.24f, 0.52f, 0.88f, 1.00f);
 
-        // window and background colors
+         
         colors[ImGuiCol_WindowBg] = bg_color;
         colors[ImGuiCol_ChildBg] = ImVec4(0.17f, 0.17f, 0.17f, 1.00f);
         colors[ImGuiCol_PopupBg] = ImVec4(0.12f, 0.12f, 0.12f, 0.94f);
@@ -39,7 +39,7 @@ namespace LocalTether::UI {
         colors[ImGuiCol_FrameBgHovered] = ImVec4(0.35f, 0.35f, 0.35f, 1.00f);
         colors[ImGuiCol_FrameBgActive] = ImVec4(0.30f, 0.30f, 0.30f, 1.00f);
 
-        // Tabs
+         
         colors[ImGuiCol_Tab] = ImVec4(0.21f, 0.21f, 0.21f, 0.86f);
         colors[ImGuiCol_TabHovered] = accent_hover;
         colors[ImGuiCol_TabActive] = accent_active;

@@ -43,8 +43,8 @@ std::vector<uint8_t> WindowsInput::getPauseKeyCombo() const {
 }
 
 void WindowsInput::setPauseKeyCombo(const std::vector<uint8_t>& combo) {
-    InputManager::pause_key_combo_ = combo; // Use base class member
-    if (combo.empty() && InputManager::input_globally_paused_.load(std::memory_order_relaxed)) { // Use base class member
+    InputManager::pause_key_combo_ = combo;  
+    if (combo.empty() && InputManager::input_globally_paused_.load(std::memory_order_relaxed)) {  
         InputManager::input_globally_paused_.store(false, std::memory_order_relaxed);
         LocalTether::Utils::Logger::GetInstance().Info("WindowsInput: Pause combo cleared, input resumed.");
     } else if (!combo.empty()) {
@@ -56,15 +56,15 @@ std::vector<LocalTether::Network::InputPayload> WindowsInput::pollEvents() {
         return {};
     }
 
-    // Declare current_payload and events_found here
-    LocalTether::Network::InputPayload current_payload; // relativeX/Y default to -1.0f
+     
+    LocalTether::Network::InputPayload current_payload;  
     bool events_found = false;
     std::vector<LocalTether::Network::InputPayload> payloads;
 
 
-    // Pause Combo Check Part 1 (before checking global pause state)
+     
     if (!InputManager::pause_key_combo_.empty()) {
-        bool combo_currently_held_now = true; // Use a different name to avoid conflict with static
+        bool combo_currently_held_now = true;  
         for (uint8_t key_vk_code : InputManager::pause_key_combo_) {
             if (!(GetAsyncKeyState(static_cast<int>(key_vk_code)) & 0x8000)) {
                 combo_currently_held_now = false;
@@ -72,8 +72,8 @@ std::vector<LocalTether::Network::InputPayload> WindowsInput::pollEvents() {
             }
         }
         
-        // Toggle pause state on combo press (not release)
-        if (combo_currently_held_now && !previous_combo_held) { // previous_combo_held is now a member
+         
+        if (combo_currently_held_now && !previous_combo_held) {  
             bool new_pause_state = !InputManager::input_globally_paused_.load(std::memory_order_relaxed);
             InputManager::input_globally_paused_.store(new_pause_state, std::memory_order_relaxed);
             
@@ -83,30 +83,30 @@ std::vector<LocalTether::Network::InputPayload> WindowsInput::pollEvents() {
                 LocalTether::Utils::Logger::GetInstance().Info("WindowsInput: Input RESUMED by combo toggle.");
             }
         }
-        previous_combo_held = combo_currently_held_now; // Update member variable
+        previous_combo_held = combo_currently_held_now;  
     }
 
     if (InputManager::input_globally_paused_.load(std::memory_order_relaxed)) {
         return {}; 
     }
 
-    // auto keyEvents = findKeyChanges(); // This was the old structure
-    // if (!keyEvents.empty()) { ... }
-    // The new structure integrates key polling more directly or assumes findKeyChanges populates current_payload.keyEvents
+     
+     
+     
 
-    // 1. Poll Key Changes
-    current_payload.keyEvents = findKeyChanges(); // Assuming findKeyChanges returns std::vector<KeyEvent>
+     
+    current_payload.keyEvents = findKeyChanges();  
     if (!current_payload.keyEvents.empty()) {
         events_found = true;
     }
 
-    // This pause combo logic seems redundant or misplaced if the one above is active.
-    // The original code had two pause combo checks. I'll keep the first one and remove this one
-    // to avoid confusion and potential double toggling.
+     
+     
+     
     /*
-    if (!InputManager::pause_key_combo_.empty() && !current_payload.keyEvents.empty()) { // Check only if there are key events
+    if (!InputManager::pause_key_combo_.empty() && !current_payload.keyEvents.empty()) {  
         std::vector<BYTE> currentlyPressedVkCodes;
-        for(const auto& ke : current_payload.keyEvents) { // Use current_payload.keyEvents
+        for(const auto& ke : current_payload.keyEvents) {  
             if(ke.isPressed) currentlyPressedVkCodes.push_back(ke.keyCode);
         }
 
@@ -114,7 +114,7 @@ std::vector<LocalTether::Network::InputPayload> WindowsInput::pollEvents() {
         if (currentlyPressedVkCodes.size() < InputManager::pause_key_combo_.size()) { 
             pauseComboActive = false;
         } else {
-            for (uint8_t pKey : InputManager::pause_key_combo_) { // Use uint8_t to match combo type
+            for (uint8_t pKey : InputManager::pause_key_combo_) {  
                 bool found = false;
                 for (BYTE cKey : currentlyPressedVkCodes) {
                     if (cKey == pKey) {
@@ -129,7 +129,7 @@ std::vector<LocalTether::Network::InputPayload> WindowsInput::pollEvents() {
             }
         }
 
-        if (pauseComboActive) { // Simplified: if combo is active based on current key events
+        if (pauseComboActive) {  
             InputManager::input_globally_paused_.store(true, std::memory_order_relaxed);
             LocalTether::Utils::Logger::GetInstance().Info("Input sending paused by combo (from key events).");
             return {}; 
@@ -137,15 +137,15 @@ std::vector<LocalTether::Network::InputPayload> WindowsInput::pollEvents() {
     }
     */
     
-    // If key events were found and they were not a pause combo, add them.
-    // This logic needs to be re-evaluated. If findKeyChanges() populates current_payload.keyEvents,
-    // and events_found is true, we will later add current_payload to payloads if any mouse activity also occurs,
-    // or if only key events occurred.
+     
+     
+     
+     
 
-    // The original code structure was:
-    // 1. Poll keys -> if key events, make a kbdPayload and add to payloads.
-    // 2. Poll mouse -> if mouse events, make a mousePayload (or augment existing if logic allows).
-    // Let's try to stick to one current_payload that accumulates events.
+     
+     
+     
+     
 
     POINT cursorPos;
     if (GetCursorPos(&cursorPos)) {
@@ -392,9 +392,9 @@ void WindowsInput::simulateInput( LocalTether::Network::InputPayload payload, ui
     if (payload.isMouseEvent) {
         INPUT mouseEvent = {0};
         mouseEvent.type = INPUT_MOUSE;
-        bool needsSynReport = false; // Windows SendInput batches implicitly
+        bool needsSynReport = false;  
 
-        // Position
+         
         if (payload.relativeX != -1.0f && payload.relativeY != -1.0f) {
             float processedSimX, processedSimY;
             processSimulatedMouseCoordinates(payload.relativeX, payload.relativeY, payload.sourceDeviceType, processedSimX, processedSimY);
@@ -402,19 +402,19 @@ void WindowsInput::simulateInput( LocalTether::Network::InputPayload payload, ui
             LocalTether::Utils::Logger::GetInstance().Debug("WindowsInput: Simulated mouse coordinates processed to (" + std::to_string(processedSimX) + ", " + std::to_string(processedSimY) + ")");
             payload.relativeX = processedSimX;
             payload.relativeY = processedSimY;
-            mouseEvent.mi.dx = static_cast<LONG>(payload.relativeX * 65535.0f); // Range 0-65535
+            mouseEvent.mi.dx = static_cast<LONG>(payload.relativeX * 65535.0f);  
             mouseEvent.mi.dy = static_cast<LONG>(payload.relativeY * 65535.0f);
             mouseEvent.mi.dwFlags |= MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE;
-            // LocalTether::Utils::Logger::GetInstance().Debug("WindowsInput: Simulating relative move (" + std::to_string(payload.relativeX) + ", " + std::to_string(payload.relativeY) + ")");
+             
         }
 
-        if ((payload.mouseButtons & 0x01) != (m_simulatedMouseButtonsState & 0x01) ) { // Left button change
+        if ((payload.mouseButtons & 0x01) != (m_simulatedMouseButtonsState & 0x01) ) {  
             mouseEvent.mi.dwFlags |= ((payload.mouseButtons & 0x01) ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP);
         }
-        if ((payload.mouseButtons & 0x02) != (m_simulatedMouseButtonsState & 0x02) ) { // Right button change
+        if ((payload.mouseButtons & 0x02) != (m_simulatedMouseButtonsState & 0x02) ) {  
             mouseEvent.mi.dwFlags |= ((payload.mouseButtons & 0x02) ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP);
         }
-        if ((payload.mouseButtons & 0x04) != (m_simulatedMouseButtonsState & 0x04) ) { // Middle button change
+        if ((payload.mouseButtons & 0x04) != (m_simulatedMouseButtonsState & 0x04) ) {  
             mouseEvent.mi.dwFlags |= ((payload.mouseButtons & 0x04) ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP);
         }
         
@@ -458,10 +458,10 @@ void WindowsInput::simulateInput( LocalTether::Network::InputPayload payload, ui
         LocalTether::Utils::Logger::GetInstance().Debug("WindowsInput: No input events processed so cant simulate anything.");
     }
 #else
-     //should never get here, but just in case
+      
     LocalTether::Utils::Logger::GetInstance().Warning("InputManager::simulateInput not implemented for this platform.");
 #endif
 }
 
 } 
-#endif // _WIN32
+#endif  

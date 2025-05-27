@@ -13,8 +13,8 @@ std::vector<uint8_t> serializeInputPayload(const Network::InputPayload& payload)
                               sizeof(payload.mouseButtons) +
                               sizeof(payload.scrollDeltaX) +
                               sizeof(payload.scrollDeltaY) +
-                              sizeof(payload.sourceDeviceType) + // New field
-                              sizeof(uint32_t) + // For keyEvents size
+                              sizeof(payload.sourceDeviceType) +  
+                              sizeof(uint32_t) +  
                               (payload.keyEvents.size() * (sizeof(uint8_t) + sizeof(bool)));
     buffer.reserve(initial_capacity);
 
@@ -28,7 +28,7 @@ std::vector<uint8_t> serializeInputPayload(const Network::InputPayload& payload)
     append(&payload.mouseButtons, sizeof(payload.mouseButtons));
     append(&payload.scrollDeltaX, sizeof(payload.scrollDeltaX));
     append(&payload.scrollDeltaY, sizeof(payload.scrollDeltaY));
-    append(&payload.sourceDeviceType, sizeof(payload.sourceDeviceType)); // Serialized new field
+    append(&payload.sourceDeviceType, sizeof(payload.sourceDeviceType));  
 
     uint32_t numKeyEvents = static_cast<uint32_t>(payload.keyEvents.size());
     append(&numKeyEvents, sizeof(numKeyEvents));
@@ -56,7 +56,7 @@ std::optional<Network::InputPayload> deserializeInputPayload(const uint8_t* data
     if (!read(&payload.mouseButtons, sizeof(payload.mouseButtons))) return std::nullopt;
     if (!read(&payload.scrollDeltaX, sizeof(payload.scrollDeltaX))) return std::nullopt;
     if (!read(&payload.scrollDeltaY, sizeof(payload.scrollDeltaY))) return std::nullopt;
-    if (!read(&payload.sourceDeviceType, sizeof(payload.sourceDeviceType))) return std::nullopt; // Deserialize new field
+    if (!read(&payload.sourceDeviceType, sizeof(payload.sourceDeviceType))) return std::nullopt;  
 
     uint32_t numKeyEvents;
     if (!read(&numKeyEvents, sizeof(numKeyEvents))) return std::nullopt;
@@ -67,8 +67,8 @@ std::optional<Network::InputPayload> deserializeInputPayload(const uint8_t* data
         if (!read(&payload.keyEvents[i].isPressed, sizeof(payload.keyEvents[i].isPressed))) return std::nullopt;
     }
 
-    // if (offset > length) return std::nullopt; // This check might be too strict if there's padding or future fields
-    if (offset > length && numKeyEvents > 0) return std::nullopt; // More precise check
+     
+    if (offset > length && numKeyEvents > 0) return std::nullopt;  
     if (offset > length && numKeyEvents == 0 && (offset - (sizeof(payload.isMouseEvent) + sizeof(payload.relativeX) + sizeof(payload.relativeY) + sizeof(payload.mouseButtons) + sizeof(payload.scrollDeltaX) + sizeof(payload.scrollDeltaY) + sizeof(payload.sourceDeviceType) + sizeof(uint32_t))) > 0 ) return std::nullopt;
 
 

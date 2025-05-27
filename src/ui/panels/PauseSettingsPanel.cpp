@@ -6,9 +6,9 @@
 namespace LocalTether::UI::Panels {
 
 PauseSettingsPanel::PauseSettingsPanel() {
-    // When the panel is created, try to load the current combo settings from config
-    // to initialize the UI state (ctrl_modifier_, main_key_ etc.)
-    // This makes the UI reflect the saved state when first opened.
+     
+     
+     
     auto& config = LocalTether::Utils::Config::GetInstance();
     std::vector<uint8_t> loaded_combo = config.Get(LocalTether::Utils::Config::PAUSE_COMBO_KEY, std::vector<uint8_t>{});
     
@@ -21,7 +21,7 @@ PauseSettingsPanel::PauseSettingsPanel() {
         if (vk == VK_CONTROL || vk == VK_LCONTROL || vk == VK_RCONTROL) ctrl_modifier_ = true;
         else if (vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT) shift_modifier_ = true;
         else if (vk == VK_MENU || vk == VK_LMENU || vk == VK_RMENU) alt_modifier_ = true;
-        else main_key_ = vk; // Assumes only one non-modifier main key
+        else main_key_ = vk;  
     }
     if (main_key_ != 0) {
         snprintf(main_key_buffer_, sizeof(main_key_buffer_), "%s", vkToString(main_key_).c_str());
@@ -30,9 +30,9 @@ PauseSettingsPanel::PauseSettingsPanel() {
     }
 }
 
-// ... vkToString, comboToString ... (as before)
+ 
 std::string PauseSettingsPanel::vkToString(uint8_t vkCode) {
-    // Basic implementation, can be expanded using a map or GetKeyNameText on Windows
+     
     if (vkCode >= 'A' && vkCode <= 'Z' || vkCode >= '0' && vkCode <= '9') {
         return std::string(1, static_cast<char>(vkCode));
     }
@@ -50,7 +50,7 @@ std::string PauseSettingsPanel::vkToString(uint8_t vkCode) {
         case VK_RETURN: return "Enter";
         case VK_TAB: return "Tab";
         case VK_SPACE: return "Space";
-        // Add more common keys as needed
+         
         default:
             return "VK(" + std::to_string(vkCode) + ")";
     }
@@ -77,7 +77,7 @@ void PauseSettingsPanel::Show(bool* p_open, LocalTether::Input::InputManager* in
         LocalTether::Utils::Logger::GetInstance().Error("InputManager is null in PauseSettingsPanel::Show");
         return;
     }
-    auto& config = LocalTether::Utils::Config::GetInstance(); // Get config instance
+    auto& config = LocalTether::Utils::Config::GetInstance();  
 
     if (!inputManager) {
         ImGui::Begin("Pause Key Combo Settings", p_open);
@@ -114,7 +114,7 @@ void PauseSettingsPanel::Show(bool* p_open, LocalTether::Input::InputManager* in
                 else if (key == ImGuiKey_Enter || key == ImGuiKey_KeypadEnter) captured_vk = VK_RETURN;
                 else if (key == ImGuiKey_Tab) captured_vk = VK_TAB;
                 else if (key == ImGuiKey_Space) captured_vk = VK_SPACE;
-                // Add more mappings
+                 
 
                 if (captured_vk != 0) {
                     main_key_ = captured_vk;
@@ -159,7 +159,7 @@ void PauseSettingsPanel::Show(bool* p_open, LocalTether::Input::InputManager* in
         if (!currently_editing_combo_.empty()) {
             inputManager->setPauseKeyCombo(currently_editing_combo_);
             config.Set(LocalTether::Utils::Config::PAUSE_COMBO_KEY, currently_editing_combo_);
-            config.SaveToFile(); // Save to default path
+            config.SaveToFile();  
             LocalTether::Utils::Logger::GetInstance().Info("UI: Pause combo applied and saved: " + comboToString(currently_editing_combo_));
         } else {
             LocalTether::Utils::Logger::GetInstance().Warning("UI: Cannot apply an empty combo. Clear instead if intended.");
@@ -170,7 +170,7 @@ void PauseSettingsPanel::Show(bool* p_open, LocalTether::Input::InputManager* in
         std::vector<uint8_t> empty_combo;
         inputManager->setPauseKeyCombo(empty_combo);
         config.Set(LocalTether::Utils::Config::PAUSE_COMBO_KEY, empty_combo);
-        config.SaveToFile(); // Save to default path
+        config.SaveToFile();  
         
         ctrl_modifier_ = false;
         shift_modifier_ = false;

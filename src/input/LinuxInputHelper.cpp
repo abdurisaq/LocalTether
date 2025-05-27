@@ -37,14 +37,15 @@ struct HelperSharedData {
     char socket_path[256];
     bool ready;
 };
-enum class IPCCommandType : uint8_t {
-        SimulateInput = 1,
-        PauseStream = 2,
-        ResumeStream = 3,
-        Shutdown = 4
-    };
 
-const char* SHM_NAME = "/localtether_shm_helper_info"; 
+enum class IPCCommandType : uint8_t {
+    SimulateInput = 1,
+    PauseStream = 2,
+    ResumeStream = 3,
+    Shutdown = 4
+};
+
+const char* SHM_NAME = "/localtether_shm_helper_info";
 static HelperSharedData* g_shared_data_ptr = nullptr;
 static int g_shm_fd = -1;
 
@@ -57,12 +58,10 @@ static asio::local::stream_protocol::socket* g_main_app_socket_ptr = nullptr;
 static std::vector<struct libevdev*> g_evdev_devices;
 static std::vector<int> g_evdev_fds;
 static struct libevdev_uinput* g_uinput_device = nullptr;
-static std::atomic<bool> g_input_polling_paused(false);
 
 static int g_client_screen_width = 0;
 static int g_client_screen_height = 0;
 static std::string G_ACTUAL_SOCKET_PATH;
-
 
 static int32_t g_helper_abs_x = 0;
 static int32_t g_helper_abs_y = 0;
@@ -81,15 +80,15 @@ static std::map<int, struct input_absinfo> g_abs_y_info_map;
 static const int HELPER_MOUSE_DEADZONE_SQUARED = 2 * 2;
 
 static std::map<int, bool> g_device_is_touch_pointer;
+static std::map<int, bool> g_device_is_part_of_touchpad_system;
 static std::map<int, bool> g_device_touch_is_active;
-static std::map<int, std::optional<std::pair<int32_t, int32_t>>> g_device_initial_raw_abs_at_touch_start; 
+static std::map<int, std::optional<std::pair<int32_t, int32_t>>> g_device_initial_raw_abs_at_touch_start;
 static std::map<int, std::optional<std::pair<int32_t, int32_t>>> g_device_screen_coords_at_touch_start;
 static std::map<int, std::optional<int32_t>> g_pending_abs_x_for_fd;
 static std::map<int, std::optional<int32_t>> g_pending_abs_y_for_fd;
 
 static constexpr size_t VK_KEY_STATE_ARRAY_SIZE = (256 / 8);
 static std::array<uint8_t, VK_KEY_STATE_ARRAY_SIZE> g_helper_vk_key_states_bitmask;
-
 
 static std::atomic<float> g_h_lastSimulatedRelativeX{-1.0f};
 static std::atomic<float> g_h_lastSimulatedRelativeY{-1.0f};
@@ -112,28 +111,18 @@ static void helper_process_simulated_mouse_coordinates(float payloadX, float pay
     float anchorDevX_val = g_h_anchorDeviceRelativeX.load(std::memory_order_relaxed);
     float anchorDevY_val = g_h_anchorDeviceRelativeY.load(std::memory_order_relaxed);
 
-    LT::Utils::Logger::GetInstance().Debug(
-        "HelperSimMouseProc START: payload(" + std::to_string(payloadX) + "," + std::to_string(payloadY) +
-        "), lastSim(" + std::to_string(lastSimX_val) + "," + std::to_string(lastSimY_val) +
-        "), anchorDev(" + std::to_string(anchorDevX_val) + "," + std::to_string(anchorDevY_val) + ")"
-    );
-    
-    if (payloadX < 0.0f || payloadY < 0.0f) { // Invalid payload
+    if (payloadX < 0.0f || payloadY < 0.0f) {
         outSimX = (lastSimX_val >= 0.0f) ? lastSimX_val : 0.5f;
         outSimY = (lastSimY_val >= 0.0f) ? lastSimY_val : 0.5f;
-        LT::Utils::Logger::GetInstance().Debug("HelperSimMouseProc: Invalid payload. Outputting last valid or default. Sim: (" + std::to_string(outSimX) + "," + std::to_string(outSimY) + ")");
         return;
     }
 
     if (sourceDevice == LT::Network::InputSourceDeviceType::TRACKPAD_ABSOLUTE) {
-        LT::Utils::Logger::GetInstance().Debug("HelperSimMouseProc: Applying TRACKPAD_ABSOLUTE logic.");
-        if (lastSimX_val < 0.0f || anchorDevX_val < 0.0f) { // Initial state or after reset for trackpad
-            LT::Utils::Logger::GetInstance().Debug("HelperSimMouseProc: Trackpad initial state or reset.");
+        if (lastSimX_val < 0.0f || anchorDevX_val < 0.0f) {
             outSimX = payloadX;
             outSimY = payloadY;
             g_h_anchorDeviceRelativeX.store(payloadX, std::memory_order_relaxed);
             g_h_anchorDeviceRelativeY.store(payloadY, std::memory_order_relaxed);
-            LT::Utils::Logger::GetInstance().Debug("HelperSimMouseProc: Trackpad set outSim to payload, anchor to payload. New Anchor: (" + std::to_string(payloadX) + "," + std::to_string(payloadY) + ")");
         } else {
             float deltaPayloadToAnchorX = payloadX - anchorDevX_val;
             float deltaPayloadToAnchorY = payloadY - anchorDevY_val;
@@ -141,33 +130,22 @@ static void helper_process_simulated_mouse_coordinates(float payloadX, float pay
                                           (deltaPayloadToAnchorY * deltaPayloadToAnchorY);
             float thresholdSq = G_H_SIMULATION_JUMP_THRESHOLD * G_H_SIMULATION_JUMP_THRESHOLD;
 
-            LT::Utils::Logger::GetInstance().Debug(
-                "HelperSimMouseProc: Trackpad comparing payload to anchor. distSqPayloadToAnchor: " + std::to_string(distSqPayloadToAnchor) +
-                ", thresholdSq: " + std::to_string(thresholdSq)
-            );
-
             if (distSqPayloadToAnchor > thresholdSq) {
-                LT::Utils::Logger::GetInstance().Debug("HelperSimMouseProc: Trackpad FAR from anchor. Cursor stays. New anchor is payload.");
                 outSimX = lastSimX_val;
                 outSimY = lastSimY_val;
                 g_h_anchorDeviceRelativeX.store(payloadX, std::memory_order_relaxed);
                 g_h_anchorDeviceRelativeY.store(payloadY, std::memory_order_relaxed);
-                LT::Utils::Logger::GetInstance().Debug("HelperSimMouseProc: Trackpad New Anchor: (" + std::to_string(payloadX) + "," + std::to_string(payloadY) + ")");
             } else {
-                LT::Utils::Logger::GetInstance().Debug("HelperSimMouseProc: Trackpad CLOSE to anchor. Applying delta to lastSim.");
                 outSimX = lastSimX_val + deltaPayloadToAnchorX;
                 outSimY = lastSimY_val + deltaPayloadToAnchorY;
                 g_h_anchorDeviceRelativeX.store(payloadX, std::memory_order_relaxed);
                 g_h_anchorDeviceRelativeY.store(payloadY, std::memory_order_relaxed);
-                LT::Utils::Logger::GetInstance().Debug("HelperSimMouseProc: Trackpad New Anchor (updated after drag): (" + std::to_string(payloadX) + "," + std::to_string(payloadY) + ")");
             }
         }
-    } else { 
-        LT::Utils::Logger::GetInstance().Debug("HelperSimMouseProc: Applying DIRECT simulation logic for device type: " + std::to_string(static_cast<int>(sourceDevice)));
+    } else {
         outSimX = payloadX;
         outSimY = payloadY;
-        if (anchorDevX_val >= 0.0f) { 
-             LT::Utils::Logger::GetInstance().Debug("HelperSimMouseProc: Non-trackpad input, resetting device anchors.");
+        if (anchorDevX_val >= 0.0f) {
              g_h_anchorDeviceRelativeX.store(-1.0f, std::memory_order_relaxed);
              g_h_anchorDeviceRelativeY.store(-1.0f, std::memory_order_relaxed);
         }
@@ -178,7 +156,6 @@ static void helper_process_simulated_mouse_coordinates(float payloadX, float pay
 
     g_h_lastSimulatedRelativeX.store(outSimX, std::memory_order_relaxed);
     g_h_lastSimulatedRelativeY.store(outSimY, std::memory_order_relaxed);
-    LT::Utils::Logger::GetInstance().Debug("HelperSimMouseProc END: Final outSim(" + std::to_string(outSimX) + "," + std::to_string(outSimY) + "), stored as lastSim.");
 }
 
 static void update_helper_vk_key_state(uint8_t vk_code, bool pressed) {
@@ -204,7 +181,6 @@ static bool is_helper_vk_key_pressed(uint8_t vk_code) {
     return false;
 }
 
-
 static inline int32_t scale_abs_value_to_screen(int32_t value, const struct input_absinfo* absinfo, int32_t screen_dim) {
     if (!absinfo || absinfo->maximum == absinfo->minimum || screen_dim <= 0) {
         return screen_dim / 2;
@@ -213,7 +189,6 @@ static inline int32_t scale_abs_value_to_screen(int32_t value, const struct inpu
     double ratio = static_cast<double>(value - absinfo->minimum) / (absinfo->maximum - absinfo->minimum);
     return static_cast<int32_t>(ratio * (screen_dim - 1));
 }
-
 
 void helper_signal_handler(int signum) {
     LT::Utils::Logger::GetInstance().Info("Input Helper: Signal " + std::to_string(signum) + " received. Shutting down.");
@@ -312,6 +287,7 @@ bool initialize_input_devices() {
     g_abs_x_info_map.clear();
     g_abs_y_info_map.clear();
     g_device_is_touch_pointer.clear();
+    g_device_is_part_of_touchpad_system.clear();
     g_device_touch_is_active.clear();
     g_device_initial_raw_abs_at_touch_start.clear();
     g_device_screen_coords_at_touch_start.clear();
@@ -341,12 +317,12 @@ bool initialize_input_devices() {
         bool is_relevant_for_polling = false;
         const char* id_keyboard = udev_device_get_property_value(dev_udev, "ID_INPUT_KEYBOARD");
         const char* id_mouse = udev_device_get_property_value(dev_udev, "ID_INPUT_MOUSE");
-        const char* id_touchpad = udev_device_get_property_value(dev_udev, "ID_INPUT_TOUCHPAD");
+        const char* id_touchpad_prop_val = udev_device_get_property_value(dev_udev, "ID_INPUT_TOUCHPAD");
         const char* id_input = udev_device_get_property_value(dev_udev, "ID_INPUT");
 
         if ((id_keyboard && strcmp(id_keyboard, "1") == 0) ||
             (id_mouse && strcmp(id_mouse, "1") == 0) ||
-            (id_touchpad && strcmp(id_touchpad, "1") == 0) ||
+            (id_touchpad_prop_val && strcmp(id_touchpad_prop_val, "1") == 0) ||
             (id_input && strcmp(id_input, "1") == 0)
             ) {
             is_relevant_for_polling = true;
@@ -360,7 +336,7 @@ bool initialize_input_devices() {
             if (libevdev_set_fd(ev_dev, fd) < 0) {
                 libevdev_free(ev_dev); close(fd); udev_device_unref(dev_udev); continue;
             }
-            
+
             bool has_keys = libevdev_has_event_type(ev_dev, EV_KEY);
             bool has_rel_motion = libevdev_has_event_type(ev_dev, EV_REL) &&
                                   (libevdev_has_event_code(ev_dev, EV_REL, REL_X) || libevdev_has_event_code(ev_dev, EV_REL, REL_Y));
@@ -392,14 +368,22 @@ bool initialize_input_devices() {
                     if (absinfo) g_abs_y_info_map[fd] = *absinfo;
                 }
 
-                bool dev_has_abs_xy = (g_abs_x_info_map.count(fd) && g_abs_y_info_map.count(fd));
-                bool dev_has_btn_touch = libevdev_has_event_code(ev_dev, EV_KEY, BTN_TOUCH);
+                bool is_udev_touchpad = (id_touchpad_prop_val && strcmp(id_touchpad_prop_val, "1") == 0);
+                bool dev_has_abs_xy_for_surface = (g_abs_x_info_map.count(fd) && g_abs_y_info_map.count(fd));
+                bool dev_has_btn_touch_for_surface = libevdev_has_event_code(ev_dev, EV_KEY, BTN_TOUCH);
 
-                if (dev_has_abs_xy && dev_has_btn_touch) {
+                if (dev_has_abs_xy_for_surface && dev_has_btn_touch_for_surface) {
                     g_device_is_touch_pointer[fd] = true;
-                    LT::Utils::Logger::GetInstance().Debug("Input Helper: Device " + std::string(devnode) + " registered as a touch pointer.");
+                    g_device_is_part_of_touchpad_system[fd] = true;
+                    LT::Utils::Logger::GetInstance().Debug("Input Helper: Device " + std::string(devnode) + " registered as a touch pointer surface.");
                 } else {
                     g_device_is_touch_pointer[fd] = false;
+                    if (is_udev_touchpad) {
+                        g_device_is_part_of_touchpad_system[fd] = true;
+                        LT::Utils::Logger::GetInstance().Debug("Input Helper: Device " + std::string(devnode) + " identified as part of touchpad system by udev.");
+                    } else {
+                        g_device_is_part_of_touchpad_system[fd] = false;
+                    }
                 }
                 g_device_touch_is_active[fd] = false;
             } else {
@@ -412,9 +396,9 @@ bool initialize_input_devices() {
     udev_unref(udev);
 
     struct libevdev* uinput_template_dev = libevdev_new();
-    if (!uinput_template_dev) { 
+    if (!uinput_template_dev) {
         LT::Utils::Logger::GetInstance().Error("Input Helper: libevdev_new failed for uinput_template_dev.");
-        return false; 
+        return false;
     }
     libevdev_set_name(uinput_template_dev, "LocalTether Virtual Input");
 
@@ -422,7 +406,7 @@ bool initialize_input_devices() {
     libevdev_enable_event_code(uinput_template_dev, EV_SYN, SYN_REPORT, nullptr);
 
     libevdev_enable_event_type(uinput_template_dev, EV_KEY);
-    for (unsigned int key = KEY_ESC; key <= KEY_KPDOT; ++key) { 
+    for (unsigned int key = KEY_ESC; key <= KEY_KPDOT; ++key) {
         libevdev_enable_event_code(uinput_template_dev, EV_KEY, key, nullptr);
     }
     libevdev_enable_event_code(uinput_template_dev, EV_KEY, KEY_LEFTSHIFT, nullptr);
@@ -434,13 +418,11 @@ bool initialize_input_devices() {
     libevdev_enable_event_code(uinput_template_dev, EV_KEY, KEY_LEFTMETA, nullptr);
     libevdev_enable_event_code(uinput_template_dev, EV_KEY, KEY_RIGHTMETA, nullptr);
 
-
     libevdev_enable_event_code(uinput_template_dev, EV_KEY, BTN_LEFT, nullptr);
     libevdev_enable_event_code(uinput_template_dev, EV_KEY, BTN_RIGHT, nullptr);
     libevdev_enable_event_code(uinput_template_dev, EV_KEY, BTN_MIDDLE, nullptr);
     libevdev_enable_event_code(uinput_template_dev, EV_KEY, BTN_SIDE, nullptr);
     libevdev_enable_event_code(uinput_template_dev, EV_KEY, BTN_EXTRA, nullptr);
-
 
     libevdev_enable_event_type(uinput_template_dev, EV_REL);
     libevdev_enable_event_code(uinput_template_dev, EV_REL, REL_X, nullptr);
@@ -457,10 +439,10 @@ bool initialize_input_devices() {
     abs_info_y_virt.minimum = 0;
     abs_info_y_virt.maximum = g_client_screen_height > 0 ? g_client_screen_height - 1 : 1079;
     libevdev_enable_event_code(uinput_template_dev, EV_ABS, ABS_Y, &abs_info_y_virt);
-    
+
     libevdev_enable_property(uinput_template_dev, INPUT_PROP_POINTER);
-    
-    int uinput_err = libevdev_uinput_create_from_device(uinput_template_dev, 
+
+    int uinput_err = libevdev_uinput_create_from_device(uinput_template_dev,
                                                       LIBEVDEV_UINPUT_OPEN_MANAGED, &g_uinput_device);
     libevdev_free(uinput_template_dev);
     if (uinput_err != 0) {
@@ -471,9 +453,8 @@ bool initialize_input_devices() {
     return true;
 }
 
-
 void poll_events_once_and_send(asio::local::stream_protocol::socket& target_socket) {
-    if (g_evdev_fds.empty() || g_input_polling_paused.load(std::memory_order_relaxed)) {
+    if (g_evdev_fds.empty()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
         return;
     }
@@ -485,7 +466,7 @@ void poll_events_once_and_send(asio::local::stream_protocol::socket& target_sock
     int ret = select(max_fd + 1, &read_fds, nullptr, nullptr, &tv);
     if (ret <= 0) return;
 
-    LT::Network::InputPayload current_payload; 
+    LT::Network::InputPayload current_payload;
     bool events_accumulated = false;
     bool raw_mouse_moved_this_cycle = false;
     bool raw_mouse_button_changed_this_cycle = false;
@@ -520,10 +501,8 @@ void poll_events_once_and_send(asio::local::stream_protocol::socket& target_sock
                             g_device_touch_is_active[current_fd] = true;
                             g_device_initial_raw_abs_at_touch_start[current_fd] = std::nullopt;
                             g_device_screen_coords_at_touch_start[current_fd] = {g_helper_abs_x, g_helper_abs_y};
-                            LT::Utils::Logger::GetInstance().Debug("Input Helper: BTN_TOUCH down on fd " + std::to_string(current_fd) + ". Screen anchor: (" + std::to_string(g_helper_abs_x) + "," + std::to_string(g_helper_abs_y) + ")");
                         } else {
                             g_device_touch_is_active[current_fd] = false;
-                            LT::Utils::Logger::GetInstance().Debug("Input Helper: BTN_TOUCH up on fd " + std::to_string(current_fd));
                         }
                     } else if (vk_code != 0) {
                         bool currently_pressed_in_helper_state = is_helper_vk_key_pressed(vk_code);
@@ -534,7 +513,7 @@ void poll_events_once_and_send(asio::local::stream_protocol::socket& target_sock
                             current_payload.keyEvents.push_back({vk_code, false});
                             update_helper_vk_key_state(vk_code, false);
                         }
-                        
+
                         uint8_t old_buttons = g_helper_mouse_buttons_state;
                         if (ev.code == BTN_LEFT) { if (event_is_pressed_state) g_helper_mouse_buttons_state |= 0x01; else g_helper_mouse_buttons_state &= ~0x01; }
                         else if (ev.code == BTN_RIGHT) { if (event_is_pressed_state) g_helper_mouse_buttons_state |= 0x02; else g_helper_mouse_buttons_state &= ~0x02; }
@@ -545,12 +524,12 @@ void poll_events_once_and_send(asio::local::stream_protocol::socket& target_sock
                     }
                 } else if (ev.type == EV_REL) {
                     if (g_helper_mouse_state_initialized) {
-                        if (ev.code == REL_X) { 
+                        if (ev.code == REL_X) {
                             g_helper_abs_x += ev.value;
-                            raw_mouse_moved_this_cycle = true; 
+                            raw_mouse_moved_this_cycle = true;
                             g_last_processed_abs_move_was_trackpad = false;
                         }
-                        else if (ev.code == REL_Y) { 
+                        else if (ev.code == REL_Y) {
                             g_helper_abs_y += ev.value;
                             raw_mouse_moved_this_cycle = true;
                             g_last_processed_abs_move_was_trackpad = false;
@@ -600,19 +579,18 @@ void poll_events_once_and_send(asio::local::stream_protocol::socket& target_sock
                 }
 
                 if (ev.type == EV_SYN && ev.code == SYN_REPORT && events_accumulated) {
-                    bool is_touch_pointer_dev = g_device_is_touch_pointer.count(current_fd) && g_device_is_touch_pointer[current_fd];
-                    bool touch_is_active_for_dev = g_device_touch_is_active.count(current_fd) && g_device_touch_is_active[current_fd];
+                    bool is_touch_pointer_dev_syn = g_device_is_touch_pointer.count(current_fd) && g_device_is_touch_pointer[current_fd];
+                    bool touch_is_active_for_dev_syn = g_device_touch_is_active.count(current_fd) && g_device_touch_is_active[current_fd];
 
-                    if (is_touch_pointer_dev && touch_is_active_for_dev &&
+                    if (is_touch_pointer_dev_syn && touch_is_active_for_dev_syn &&
                         g_pending_abs_x_for_fd.count(current_fd) && g_pending_abs_x_for_fd[current_fd].has_value() &&
                         g_pending_abs_y_for_fd.count(current_fd) && g_pending_abs_y_for_fd[current_fd].has_value()) {
-                        
+
                         int32_t current_raw_dev_x = g_pending_abs_x_for_fd[current_fd].value();
                         int32_t current_raw_dev_y = g_pending_abs_y_for_fd[current_fd].value();
 
                         if (!g_device_initial_raw_abs_at_touch_start[current_fd].has_value()) {
                             g_device_initial_raw_abs_at_touch_start[current_fd] = {current_raw_dev_x, current_raw_dev_y};
-                            LT::Utils::Logger::GetInstance().Debug("Input Helper: Touch Start Synced. Device fd " + std::to_string(current_fd) + " raw (" + std::to_string(current_raw_dev_x) + "," + std::to_string(current_raw_dev_y) + "). Cursor at (" + std::to_string(g_helper_abs_x) + "," + std::to_string(g_helper_abs_y) + ")");
                         } else {
                             int32_t initial_raw_x = g_device_initial_raw_abs_at_touch_start[current_fd]->first;
                             int32_t initial_raw_y = g_device_initial_raw_abs_at_touch_start[current_fd]->second;
@@ -634,7 +612,7 @@ void poll_events_once_and_send(asio::local::stream_protocol::socket& target_sock
                                                    (abs_y_info.maximum - abs_y_info.minimum) *
                                                    (g_client_screen_height - 1);
                             }
-                            
+
                             if (g_device_screen_coords_at_touch_start[current_fd].has_value()) {
                                 int32_t old_abs_x = g_helper_abs_x;
                                 int32_t old_abs_y = g_helper_abs_y;
@@ -642,11 +620,10 @@ void poll_events_once_and_send(asio::local::stream_protocol::socket& target_sock
                                 g_helper_abs_y = g_device_screen_coords_at_touch_start[current_fd]->second + static_cast<int32_t>(screen_delta_y);
                                  if (g_helper_abs_x != old_abs_x || g_helper_abs_y != old_abs_y) {
                                     raw_mouse_moved_this_cycle = true;
-                                    g_last_processed_abs_move_was_trackpad = true; 
+                                    g_last_processed_abs_move_was_trackpad = true;
                                 }
                             }
                         }
-                        
                     }
                     g_pending_abs_x_for_fd[current_fd] = std::nullopt;
                     g_pending_abs_y_for_fd[current_fd] = std::nullopt;
@@ -664,45 +641,47 @@ void poll_events_once_and_send(asio::local::stream_protocol::socket& target_sock
                             mouse_moved_significantly_this_report = true;
                         }
                     }
-                    
+
                     bool mouse_buttons_changed_this_report = raw_mouse_button_changed_this_cycle;
                     bool send_mouse_update_this_report = mouse_moved_significantly_this_report || mouse_buttons_changed_this_report;
-                    
+
                     bool key_event_is_mouse_button = false;
                     for(const auto& ke : current_payload.keyEvents) {
                         if (LT::Utils::KeycodeConverter::isVkMouseButton(ke.keyCode)) {
                             key_event_is_mouse_button = true; break;
                         }
                     }
-                    
+
                     current_payload.isMouseEvent = (current_payload.scrollDeltaX != 0 || current_payload.scrollDeltaY != 0 ||
                                                     send_mouse_update_this_report || key_event_is_mouse_button);
 
-                    if (send_mouse_update_this_report && g_helper_mouse_state_initialized && g_client_screen_width > 0 && g_client_screen_height > 0) {
-                        current_payload.relativeX = static_cast<float>(g_helper_abs_x) / std::max(1, (g_client_screen_width -1));
-                        current_payload.relativeY = static_cast<float>(g_helper_abs_y) / std::max(1, (g_client_screen_height-1));
-                        current_payload.relativeX = std::max(0.0f, std::min(1.0f, current_payload.relativeX));
-                        current_payload.relativeY = std::max(0.0f, std::min(1.0f, current_payload.relativeY));
-                        
-                        g_helper_last_sent_abs_x = g_helper_abs_x;
-                        g_helper_last_sent_abs_y = g_helper_abs_y;
-                    }
                     if (current_payload.isMouseEvent) {
-                         current_payload.mouseButtons = g_helper_mouse_buttons_state;
-                    }
-                    if (mouse_buttons_changed_this_report) {
-                        g_helper_last_sent_mouse_buttons = g_helper_mouse_buttons_state;
-                    }
+                        bool current_device_is_touchpad_system_component = g_device_is_part_of_touchpad_system.count(current_fd) &&
+                                                                          g_device_is_part_of_touchpad_system[current_fd];
 
-                    if (current_payload.isMouseEvent && (send_mouse_update_this_report || key_event_is_mouse_button)) {
-                        if (g_last_processed_abs_move_was_trackpad && raw_mouse_moved_this_cycle) {
+                        if ((g_last_processed_abs_move_was_trackpad && raw_mouse_moved_this_cycle) ||
+                            (current_device_is_touchpad_system_component && mouse_buttons_changed_this_report)
+                           ) {
                             current_payload.sourceDeviceType = LT::Network::InputSourceDeviceType::TRACKPAD_ABSOLUTE;
-                        } else { 
+                        } else {
                             current_payload.sourceDeviceType = LT::Network::InputSourceDeviceType::MOUSE_ABSOLUTE;
                         }
-                    } else if (current_payload.isMouseEvent) {
-                         current_payload.sourceDeviceType = LT::Network::InputSourceDeviceType::MOUSE_ABSOLUTE;
+
+                        if (send_mouse_update_this_report && g_helper_mouse_state_initialized && g_client_screen_width > 0 && g_client_screen_height > 0) {
+                            current_payload.relativeX = static_cast<float>(g_helper_abs_x) / std::max(1, (g_client_screen_width -1));
+                            current_payload.relativeY = static_cast<float>(g_helper_abs_y) / std::max(1, (g_client_screen_height-1));
+                            current_payload.relativeX = std::max(0.0f, std::min(1.0f, current_payload.relativeX));
+                            current_payload.relativeY = std::max(0.0f, std::min(1.0f, current_payload.relativeY));
+
+                            g_helper_last_sent_abs_x = g_helper_abs_x;
+                            g_helper_last_sent_abs_y = g_helper_abs_y;
+                        }
+                        current_payload.mouseButtons = g_helper_mouse_buttons_state;
+                        if (mouse_buttons_changed_this_report) {
+                            g_helper_last_sent_mouse_buttons = g_helper_mouse_buttons_state;
+                        }
                     }
+
 
                     if (!current_payload.keyEvents.empty() || current_payload.isMouseEvent) {
                         std::vector<uint8_t> buffer = LT::Utils::serializeInputPayload(current_payload);
@@ -713,8 +692,8 @@ void poll_events_once_and_send(asio::local::stream_protocol::socket& target_sock
                             g_helper_running = false; return;
                         }
                     }
-                    
-                    current_payload = LT::Network::InputPayload(); 
+
+                    current_payload = LT::Network::InputPayload();
                     events_accumulated = false;
                     raw_mouse_moved_this_cycle = false;
                     raw_mouse_button_changed_this_cycle = false;
@@ -737,7 +716,6 @@ void simulate_input_event(LT::Network::InputPayload payload) {
     for (const auto& keyEvent : payload.keyEvents) {
         uint16_t evdev_code = LT::Utils::KeycodeConverter::vkToEvdev(keyEvent.keyCode);
         if (evdev_code != 0) {
-            LT::Utils::Logger::GetInstance().Debug("Simulating: vk_code: " + LT::Utils::Logger::getKeyName(keyEvent.keyCode) + " (" + std::to_string(keyEvent.keyCode) + ")" + " -> evdev_code: " + std::to_string(evdev_code) + (keyEvent.isPressed ? " Pressed" : " Released"));
             libevdev_uinput_write_event(g_uinput_device, EV_KEY, evdev_code, keyEvent.isPressed ? 1 : 0);
         } else {
             LT::Utils::Logger::GetInstance().Warning("Simulating: No evdev_code for vk_code: " + LT::Utils::Logger::getKeyName(keyEvent.keyCode) + " (" + std::to_string(keyEvent.keyCode) + ")");
@@ -752,14 +730,11 @@ void simulate_input_event(LT::Network::InputPayload payload) {
             payload.relativeX = processedSimX;
             payload.relativeY = processedSimY;
 
-
             int32_t target_abs_x = static_cast<int32_t>(payload.relativeX * (g_client_screen_width -1) );
             int32_t target_abs_y = static_cast<int32_t>(payload.relativeY * (g_client_screen_height -1));
 
             target_abs_x = std::max(0, std::min(target_abs_x, static_cast<int32_t>(g_client_screen_width - 1)));
             target_abs_y = std::max(0, std::min(target_abs_y, static_cast<int32_t>(g_client_screen_height - 1)));
-            
-            LT::Utils::Logger::GetInstance().Debug("Simulating: Relative (" + std::to_string(payload.relativeX) + "," + std::to_string(payload.relativeY) + ") -> Absolute (" + std::to_string(target_abs_x) + "," + std::to_string(target_abs_y) + ") for screen " + std::to_string(g_client_screen_width) + "x" + std::to_string(g_client_screen_height));
 
             libevdev_uinput_write_event(g_uinput_device, EV_ABS, ABS_X, target_abs_x);
             libevdev_uinput_write_event(g_uinput_device, EV_ABS, ABS_Y, target_abs_y);
@@ -767,7 +742,7 @@ void simulate_input_event(LT::Network::InputPayload payload) {
             LT::Utils::Logger::GetInstance().Warning("Simulating: Screen dimensions unknown in helper, cannot scale relative mouse move.");
         }
     }
-    
+
     if (payload.scrollDeltaY != 0) {
         libevdev_uinput_write_event(g_uinput_device, EV_REL, REL_WHEEL, payload.scrollDeltaY);
     }
@@ -792,14 +767,11 @@ void handle_ipc_command(const char* data, size_t length, asio::local::stream_pro
             break;
         }
         case IPCCommandType::PauseStream:
-            g_input_polling_paused.store(true, std::memory_order_relaxed);
-            LT::Utils::Logger::GetInstance().Info("Input Helper: Input polling PAUSED.");
+            LT::Utils::Logger::GetInstance().Info("Input Helper: PauseStream command received (IGNORED - helper always polls).");
             break;
         case IPCCommandType::ResumeStream:
-            if (g_input_polling_paused.exchange(false, std::memory_order_relaxed) == true) {
-                 helper_reset_simulation_state();
-            }
-            LT::Utils::Logger::GetInstance().Info("Input Helper: Input polling RESUMED.");
+            LT::Utils::Logger::GetInstance().Info("Input Helper: ResumeStream command received (IGNORED - helper always polls).");
+            helper_reset_simulation_state();
             break;
         case IPCCommandType::Shutdown:
             LT::Utils::Logger::GetInstance().Info("Input Helper: Shutdown command received.");
@@ -861,7 +833,7 @@ int runInputHelperMode(int argc, char **argv) {
                 }
             }
         }
-        
+
         if (chmod(G_ACTUAL_SOCKET_PATH.c_str(), S_IRWXU | S_IRWXG | S_IRWXO) == -1) {
              LT::Utils::Logger::GetInstance().Warning("Input Helper: chmod socket failed: " + std::string(strerror(errno)));
         }else{

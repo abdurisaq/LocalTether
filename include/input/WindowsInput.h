@@ -35,6 +35,10 @@ public:
 
     void setPauseKeyCombo(const std::vector<uint8_t>& combo) override;
     std::vector<uint8_t> getPauseKeyCombo() const override;
+
+    bool isRunning() const override {
+        return running_.load(std::memory_order_relaxed);
+    }
 private:
 
     std::vector<BYTE> currentKeys_;

@@ -79,11 +79,11 @@ void Server::doAccept() {
                 session->setClientId(nextClientId_++);
              
                 session->start(
-                    // Message handler
+                     
                     [this](std::shared_ptr<Session> s, const Message& msg) {
                         handleMessage(s, msg);
                     },
-                    // Disconnect handler
+                     
                     [this](std::shared_ptr<Session> s) {
                         handleDisconnect(s);
                     }
@@ -131,11 +131,13 @@ void Server::handleMessage(std::shared_ptr<Session> session, const Message& mess
         }
             
         case MessageType::Input: {
-
+            
+            
+            
             try {
             auto payload = message.getInputPayload();
             
-            // Log key events
+             
             if (!payload.keyEvents.empty()) {
                 std::string keyLog = "Input from " + session->getClientName() + " (" + std::to_string(session->getClientId()) + "): ";
                 
@@ -143,14 +145,14 @@ void Server::handleMessage(std::shared_ptr<Session> session, const Message& mess
                     keyLog += std::string(keyEvent.isPressed ? "PRESS " : "RELEASE ") + 
                               "VK:" + std::to_string(keyEvent.keyCode) + " ";
                     
-                    // Optionally convert VK code to human-readable name for common keys
+                     
                     keyLog +=  LocalTether::Utils::Logger::getKeyName(keyEvent.keyCode) + " ";
                 }
                 
-                LocalTether::Utils::Logger::GetInstance().Info(keyLog);
+                 
             }
             
-            // Log mouse events
+             
             if (payload.isMouseEvent) {
                 std::string mouseLog = "Mouse from " + session->getClientName() + ": ";
                 
@@ -280,7 +282,7 @@ void Server::processHandshake(std::shared_ptr<Session> session, const Message& m
         } else {
             LocalTether::Utils::Logger::GetInstance().Warning(
                 "Authentication failed for: " + session->getClientAddress() + " with name " + handshakeData.clientName);
-            auto response = Message::createCommand("auth_failed", 0); // Server (ID 0) sends command
+            auto response = Message::createCommand("auth_failed", 0);  
             session->send(response);
             session->close(); 
         }
@@ -329,9 +331,9 @@ void Server::broadcast(const Message& message) {
 }
 
 void Server::broadcastToReceivers(const Message& message) {
-    LocalTether::Utils::Logger::GetInstance().Debug(
-        "Broadcasting message to all receivers. Message type: " + 
-        std::to_string(static_cast<int>(message.getType())));
+     
+     
+     
     std::vector<std::shared_ptr<Session>> currentSessions;
     {
         std::lock_guard<std::mutex> lock(sessions_mutex_);
@@ -373,10 +375,10 @@ void Server::processCommand(std::shared_ptr<Session> session, const Message& mes
         });
     }
     else if (commandText.find("set_broadcaster ") == 0) {
-        //set broadcaster to someone else not done
+         
     }
     else {
-        // Other host commands
+         
     }
 }
 
@@ -385,10 +387,10 @@ void Server::processLimitedCommand(std::shared_ptr<Session> session, const Messa
     std::string commandText = message.getTextPayload();
     
     if (commandText == "toggle_input_stream") {
-        //non host client stuff
+         
     }
     else {
-        // Other commands
+         
     }
 }
 

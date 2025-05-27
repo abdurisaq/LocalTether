@@ -92,7 +92,7 @@ void Client::disconnect() {
         LocalTether::Utils::Logger::GetInstance().Warning(
             "Error during disconnect: " + std::string(e.what()));
     }
-    //clera
+     
     {
         std::lock_guard<std::mutex> lock(writeMutex_);
         std::queue<std::vector<uint8_t>> empty;
@@ -128,19 +128,34 @@ void Client::sendInput(const InputPayload& payload) {
 }
 
 void Client::startInputLogging() {
-    if (loggingInput_) {
+    if (loggingInput_ && inputManager_ && inputManager_->isRunning()) { 
+        LocalTether::Utils::Logger::GetInstance().Info("Input logging already active and InputManager running.");
         return;
     }
-    LocalTether::Utils::Logger::GetInstance().Info("Attempting to start input logging...");
-    
-    inputManager_ = LocalTether::Input::createInputManager(localScreenWidth_, localScreenHeight_);
+    if (loggingInput_) {  
+         LocalTether::Utils::Logger::GetInstance().Info("Input logging was active, but manager may need restart.");
+    }
 
-    if (inputManager_ && inputManager_->start()) {
+    LocalTether::Utils::Logger::GetInstance().Info("Attempting to start input logging...");
+
+    if (!inputManager_) {  
+        LocalTether::Utils::Logger::GetInstance().Info("Creating new InputManager for input logging.");
+        inputManager_ = LocalTether::Input::createInputManager(localScreenWidth_, localScreenHeight_);
+    } else {
+        LocalTether::Utils::Logger::GetInstance().Info("Reusing existing InputManager for input logging.");
+    }
+
+    if (inputManager_ && inputManager_->start()) {  
         loggingInput_ = true;
+        if (inputThread_.joinable()) {  
+            inputThread_.join();
+        }
         inputThread_ = std::thread(&Client::inputLoop, this);
         LocalTether::Utils::Logger::GetInstance().Info("Input logging thread started.");
     } else {
-        LocalTether::Utils::Logger::GetInstance().Error("Failed to start InputManager.");
+        LocalTether::Utils::Logger::GetInstance().Error("Failed to start/create InputManager for input logging.");
+         
+        loggingInput_ = false;
     }
 }
 
@@ -149,14 +164,14 @@ void Client::inputLoop() {
     LocalTether::Utils::Logger::GetInstance().Info("Input loop running...");
     while (loggingInput_ && inputManager_) {
         auto payloads = inputManager_->pollEvents();
-        for (const auto& payload : payloads) {
-            if (state_ == ClientState::Connected) {
+        if (role_ == ClientRole::Host && state_ == ClientState::Connected) {
+            for (const auto& payload : payloads) {
                 
-                 sendInput(payload);
+                sendInput(payload);
             }
         }
         
-        std::this_thread::sleep_for(std::chrono::milliseconds(10)); //hardcoded 10 for now
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));  
     }
     LocalTether::Utils::Logger::GetInstance().Info("Input loop exited.");
 }
@@ -299,14 +314,14 @@ void Client::handleRead(const std::error_code& error, size_t bytes_transferred) 
     if (!error) {
         try {
             
-            LocalTether::Utils::Logger::GetInstance().Debug(
-                "Received " + std::to_string(bytes_transferred) + " bytes from server.");
+             
+             
                 
             partialMessage_.insert(partialMessage_.end(), 
                                  readBuffer_.data(), 
                                  readBuffer_.data() + bytes_transferred);
             
-            // Process complete messages
+             
             size_t processed = 0;
             while (processed < partialMessage_.size()) {
                
@@ -339,7 +354,7 @@ void Client::handleRead(const std::error_code& error, size_t bytes_transferred) 
                                     partialMessage_.begin() + processed);
             }
             
-            // Continue reading
+             
             doRead();
         }
         catch (const std::exception& e) {
@@ -388,18 +403,19 @@ void Client::handleMessage(const Message& message) {
 
             setState(ClientState::Connected);
 
-            if (role_ == ClientRole::Host && connectHandler_) {
-                LocalTether::Utils::Logger::GetInstance().Info("Client is Host, starting input logging.");
-                startInputLogging();
-            } else if (role_ != ClientRole::Host) { 
+            if (role_ == ClientRole::Host || role_ == ClientRole::Receiver || role_ == ClientRole::Broadcaster) {
                 if (!inputManager_) {
                     inputManager_ = LocalTether::Input::createInputManager(localScreenWidth_, localScreenHeight_);
                 }
                 if (inputManager_) {
-                    inputManager_->start(); // Ensure it's started
-                    LocalTether::Utils::Logger::GetInstance().Info("InputManager started for receiver client for simulation.");
+                    if (inputManager_->start()) {
+                        
+                        startInputLogging();
+                    } else {
+                         LocalTether::Utils::Logger::GetInstance().Error("Failed to start InputManager for client");
+                    }
                 } else {
-                    LocalTether::Utils::Logger::GetInstance().Error("Failed to create/start InputManager for simulation on receiver client.");
+                    LocalTether::Utils::Logger::GetInstance().Error("Failed to create InputManager for client " );
                 }
             }
             if (connectHandler_) {
@@ -412,8 +428,11 @@ void Client::handleMessage(const Message& message) {
     if (message.getType() == MessageType::Input && role_ != ClientRole::Host) {
         if (inputManager_) { 
             try {
+                if (inputManager_->isInputGloballyPaused()) { 
+                    return; 
+                }
                 std::string keyLog = "Client received input";
-                
+
                 const auto& keyEvents = message.getInputPayload().keyEvents;
                 for(const auto & event : keyEvents){
                     keyLog += " Key: " + std::to_string(event.keyCode) + 

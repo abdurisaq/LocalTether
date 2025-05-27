@@ -36,7 +36,7 @@ namespace LocalTether::UI {
         ImGui::Begin("MainDockspace", p_open, window_flags);
         ImGui::PopStyleVar(3); 
 
-        // Main menu bar
+         
         if (ImGui::BeginMenuBar())
         {
             if (ImGui::BeginMenu("File"))
@@ -132,7 +132,7 @@ namespace LocalTether::UI {
         {
             first_time = false;
 
-            // Clear any previous layout
+             
             ImGui::DockBuilderRemoveNode(dockspace_id);
             ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
             ImGui::DockBuilderSetNodeSize(dockspace_id, ImGui::GetMainViewport()->Size);

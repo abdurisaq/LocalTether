@@ -12,9 +12,9 @@
 #include <asio/local/stream_protocol.hpp>
 #include <sys/types.h>
 #include <unistd.h>   
-#include <unordered_set> // Make sure this is included
+#include <unordered_set>  
 
-struct HelperSharedData; // Forward declaration
+struct HelperSharedData;  
 
 namespace LocalTether::Input {
 
@@ -35,7 +35,27 @@ public:
     void setPauseKeyCombo(const std::vector<uint8_t>& combo) override;
     std::vector<uint8_t> getPauseKeyCombo() const override;
 
+
+    bool isHelperConnected() const { 
+        return helper_connected_.load(std::memory_order_relaxed);
+    }
+    bool isInitializationInProgress() const { 
+        return m_init_in_progress_.load(std::memory_order_relaxed);
+    }
+
+    bool isRunning() const override {
+        return running_.load(std::memory_order_relaxed);
+    }
+
 private:
+
+    std::thread m_init_thread_; 
+    std::atomic<bool> m_init_in_progress_{false}; 
+    std::atomic<bool> m_stop_requested_{false}; 
+
+    void helperInitializationRoutine();
+
+    
     bool launchHelperProcess();
     bool connectToHelper();
     void readFromHelperLoop();
@@ -49,16 +69,16 @@ private:
     void sendCommandToHelper(IPCCommandType cmdType, const std::vector<uint8_t>& data = {});
     void sendPayloadToHelper(IPCCommandType cmdType, const LocalTether::Network::InputPayload& payload);
 
-    // Shared memory related methods
+     
     bool open_and_map_shared_memory();
     void close_and_unmap_shared_memory();
     bool read_info_from_shared_memory(pid_t& out_pid, std::string& out_socket_path);
 
     void checkAndTogglePauseCombo();
 
-    // Members for pause combo state tracking
-    std::unordered_set<uint8_t> m_currently_pressed_vk_codes; // Was: currently_pressed_keys_for_combo_
-    bool m_combo_was_active_last_poll = false; // Was: pause_combo_was_active_
+     
+    std::unordered_set<uint8_t> m_currently_pressed_vk_codes;  
+    bool m_combo_was_active_last_poll = false;  
 
     std::atomic<bool> running_{false};
     std::atomic<bool> helper_connected_{false};
@@ -83,11 +103,11 @@ private:
     uint16_t clientScreenWidth_;  
     uint16_t clientScreenHeight_; 
 
-    // Members for global mouse polling state
+     
     static constexpr int MOUSE_DEADZONE_SQUARED = 5 * 5; 
     int32_t m_lastSentHostAbsX = -1;
     int32_t m_lastSentHostAbsY = -1;
-    // Add these missing members:
+     
     float m_lastSentRelativeX = -1.0f;
     float m_lastSentRelativeY = -1.0f;
     uint8_t m_lastSentMouseButtons = 0;

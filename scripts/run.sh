@@ -33,6 +33,7 @@ if [[ -f "$EXE_PATH" ]]; then
     echo "Running LocalTether..."
     chmod +x "$EXE_PATH"
     
+    # "$EXE_PATH"
     
     nohup "$EXE_PATH" > "$LOG_FILE" 2>&1 &
     

@@ -22,7 +22,7 @@ void Session::start(MessageHandler msgHandler, DisconnectHandler disconnectHandl
     messageHandler_ = std::move(msgHandler);
     disconnectHandler_ = std::move(disconnectHandler);
     
-    // Start
+     
     doRead();
 }
 
@@ -31,11 +31,11 @@ void Session::send(const Message& message) {
         return;
     }
     auto serialized = message.serialize();
-    LocalTether::Utils::Logger::GetInstance().Debug(
-        "Session sending message: " + std::to_string(static_cast<int>(message.getType())) +
-        " to client ID: " + std::to_string(clientId_));
+     
+     
+     
 
-    auto self = shared_from_this(); // Capture shared_ptr
+    auto self = shared_from_this(); 
     asio::post(socket_.get_executor(), [self, serialized_data = std::move(serialized)]() {
         if (!self->active_.load(std::memory_order_relaxed)) {
             return;
@@ -99,7 +99,7 @@ void Session::handleRead(const std::error_code& error, size_t bytes_transferred)
             
             
             size_t processed = 0;
-            //get full msg
+             
             while (processed < partialMessage_.size()) {
                 
                 if (partialMessage_.size() - processed < sizeof(MessageHeader)) {
@@ -134,7 +134,7 @@ void Session::handleRead(const std::error_code& error, size_t bytes_transferred)
                                     partialMessage_.begin() + processed);
             }
             
-            // Continue reading
+             
             doRead();
         }
         catch (const std::exception& e) {
