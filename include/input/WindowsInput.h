@@ -2,6 +2,9 @@
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
+#ifndef NOMINMAX 
+    #define NOMINMAX
+#endif
 #include <windows.h>
 #include <winuser.h>
 #include "input/InputManager.h"
@@ -27,7 +30,7 @@ public:
     bool start() override;
     void stop() override;
     std::vector<LocalTether::Network::InputPayload> pollEvents() override;
-    void simulateInput(const LocalTether::Network::InputPayload& payload, uint16_t hostScreenWidth, uint16_t hostScreenHeight) override; 
+    void simulateInput( LocalTether::Network::InputPayload payload, uint16_t hostScreenWidth, uint16_t hostScreenHeight) override; 
 
 
     void setPauseKeyCombo(const std::vector<uint8_t>& combo) override;

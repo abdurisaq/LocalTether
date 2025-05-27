@@ -7,105 +7,71 @@ std::vector<uint8_t> serializeInputPayload(const Network::InputPayload& payload)
     std::vector<uint8_t> buffer;
 
   
-    size_t fixedSize = sizeof(payload.isMouseEvent) +
-                       sizeof(payload.relativeX) +
-                       sizeof(payload.relativeY) +
-                       sizeof(payload.mouseButtons) +
-                       sizeof(payload.scrollDeltaX) +
-                       sizeof(payload.scrollDeltaY);
+    size_t initial_capacity = sizeof(payload.isMouseEvent) +
+                              sizeof(payload.relativeX) +
+                              sizeof(payload.relativeY) +
+                              sizeof(payload.mouseButtons) +
+                              sizeof(payload.scrollDeltaX) +
+                              sizeof(payload.scrollDeltaY) +
+                              sizeof(payload.sourceDeviceType) + // New field
+                              sizeof(uint32_t) + // For keyEvents size
+                              (payload.keyEvents.size() * (sizeof(uint8_t) + sizeof(bool)));
+    buffer.reserve(initial_capacity);
 
-    size_t keyEventsCountSize = sizeof(uint32_t);
-    size_t keyEventsDataSize = payload.keyEvents.size() * sizeof(Network::KeyEvent);
+    auto append = [&](const void* d, size_t s) {
+        buffer.insert(buffer.end(), static_cast<const uint8_t*>(d), static_cast<const uint8_t*>(d) + s);
+    };
 
+    append(&payload.isMouseEvent, sizeof(payload.isMouseEvent));
+    append(&payload.relativeX, sizeof(payload.relativeX));
+    append(&payload.relativeY, sizeof(payload.relativeY));
+    append(&payload.mouseButtons, sizeof(payload.mouseButtons));
+    append(&payload.scrollDeltaX, sizeof(payload.scrollDeltaX));
+    append(&payload.scrollDeltaY, sizeof(payload.scrollDeltaY));
+    append(&payload.sourceDeviceType, sizeof(payload.sourceDeviceType)); // Serialized new field
 
-    buffer.resize(fixedSize + keyEventsCountSize + keyEventsDataSize);
-
-    size_t offset = 0;
-
-
-    memcpy(buffer.data() + offset, &payload.isMouseEvent, sizeof(payload.isMouseEvent));
-    offset += sizeof(payload.isMouseEvent);
-
-    memcpy(buffer.data() + offset, &payload.relativeX, sizeof(payload.relativeX));
-    offset += sizeof(payload.relativeX);
-
-    memcpy(buffer.data() + offset, &payload.relativeY, sizeof(payload.relativeY));
-    offset += sizeof(payload.relativeY);
-
-    memcpy(buffer.data() + offset, &payload.mouseButtons, sizeof(payload.mouseButtons));
-    offset += sizeof(payload.mouseButtons);
-
-    memcpy(buffer.data() + offset, &payload.scrollDeltaX, sizeof(payload.scrollDeltaX));
-    offset += sizeof(payload.scrollDeltaX);
-
-    memcpy(buffer.data() + offset, &payload.scrollDeltaY, sizeof(payload.scrollDeltaY));
-    offset += sizeof(payload.scrollDeltaY);
-
-
-    uint32_t keyEventsCount = static_cast<uint32_t>(payload.keyEvents.size());
-    memcpy(buffer.data() + offset, &keyEventsCount, sizeof(keyEventsCount));
-    offset += sizeof(keyEventsCount);
-
-    if (keyEventsCount > 0) {
-        memcpy(buffer.data() + offset, payload.keyEvents.data(), keyEventsDataSize);
+    uint32_t numKeyEvents = static_cast<uint32_t>(payload.keyEvents.size());
+    append(&numKeyEvents, sizeof(numKeyEvents));
+    for (const auto& keyEvent : payload.keyEvents) {
+        append(&keyEvent.keyCode, sizeof(keyEvent.keyCode));
+        append(&keyEvent.isPressed, sizeof(keyEvent.isPressed));
     }
-
     return buffer;
 }
 
 std::optional<Network::InputPayload> deserializeInputPayload(const uint8_t* data, size_t length) {
     Network::InputPayload payload;
-
-
-    size_t minSize = sizeof(payload.isMouseEvent) +
-                     sizeof(payload.relativeX) +
-                     sizeof(payload.relativeY) +
-                     sizeof(payload.mouseButtons) +
-                     sizeof(payload.scrollDeltaX) +
-                     sizeof(payload.scrollDeltaY) +
-                     sizeof(uint32_t); 
-
-    if (length < minSize) {
-        return std::nullopt;
-    }
-
     size_t offset = 0;
 
+    auto read = [&](void* dest, size_t s) {
+        if (offset + s > length) return false;
+        std::memcpy(dest, data + offset, s);
+        offset += s;
+        return true;
+    };
 
-    memcpy(&payload.isMouseEvent, data + offset, sizeof(payload.isMouseEvent));
-    offset += sizeof(payload.isMouseEvent);
+    if (!read(&payload.isMouseEvent, sizeof(payload.isMouseEvent))) return std::nullopt;
+    if (!read(&payload.relativeX, sizeof(payload.relativeX))) return std::nullopt;
+    if (!read(&payload.relativeY, sizeof(payload.relativeY))) return std::nullopt;
+    if (!read(&payload.mouseButtons, sizeof(payload.mouseButtons))) return std::nullopt;
+    if (!read(&payload.scrollDeltaX, sizeof(payload.scrollDeltaX))) return std::nullopt;
+    if (!read(&payload.scrollDeltaY, sizeof(payload.scrollDeltaY))) return std::nullopt;
+    if (!read(&payload.sourceDeviceType, sizeof(payload.sourceDeviceType))) return std::nullopt; // Deserialize new field
 
-    memcpy(&payload.relativeX, data + offset, sizeof(payload.relativeX));
-    offset += sizeof(payload.relativeX);
+    uint32_t numKeyEvents;
+    if (!read(&numKeyEvents, sizeof(numKeyEvents))) return std::nullopt;
 
-    memcpy(&payload.relativeY, data + offset, sizeof(payload.relativeY));
-    offset += sizeof(payload.relativeY);
-
-    memcpy(&payload.mouseButtons, data + offset, sizeof(payload.mouseButtons));
-    offset += sizeof(payload.mouseButtons);
-
-    memcpy(&payload.scrollDeltaX, data + offset, sizeof(payload.scrollDeltaX));
-    offset += sizeof(payload.scrollDeltaX);
-
-    memcpy(&payload.scrollDeltaY, data + offset, sizeof(payload.scrollDeltaY));
-    offset += sizeof(payload.scrollDeltaY);
-
-    uint32_t keyEventsCount = 0;
-    memcpy(&keyEventsCount, data + offset, sizeof(keyEventsCount));
-    offset += sizeof(keyEventsCount);
-
-
-    size_t requiredSize = offset + keyEventsCount * sizeof(Network::KeyEvent);
-    if (length < requiredSize) {
-        return std::nullopt;
+    payload.keyEvents.resize(numKeyEvents);
+    for (uint32_t i = 0; i < numKeyEvents; ++i) {
+        if (!read(&payload.keyEvents[i].keyCode, sizeof(payload.keyEvents[i].keyCode))) return std::nullopt;
+        if (!read(&payload.keyEvents[i].isPressed, sizeof(payload.keyEvents[i].isPressed))) return std::nullopt;
     }
 
-    if (keyEventsCount > 0) {
-        payload.keyEvents.resize(keyEventsCount);
-        memcpy(payload.keyEvents.data(), data + offset, keyEventsCount * sizeof(Network::KeyEvent));
-    }
+    // if (offset > length) return std::nullopt; // This check might be too strict if there's padding or future fields
+    if (offset > length && numKeyEvents > 0) return std::nullopt; // More precise check
+    if (offset > length && numKeyEvents == 0 && (offset - (sizeof(payload.isMouseEvent) + sizeof(payload.relativeX) + sizeof(payload.relativeY) + sizeof(payload.mouseButtons) + sizeof(payload.scrollDeltaX) + sizeof(payload.scrollDeltaY) + sizeof(payload.sourceDeviceType) + sizeof(uint32_t))) > 0 ) return std::nullopt;
+
 
     return payload;
 }
-
-} 
+}

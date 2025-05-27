@@ -463,7 +463,7 @@ void LinuxInput::sendPayloadToHelper(IPCCommandType cmdType, const LT::Network::
     sendCommandToHelper(cmdType, serialized_payload);
 }
 
-void LinuxInput::simulateInput(const LT::Network::InputPayload& payload, uint16_t hostScreenWidth, uint16_t hostScreenHeight) {
+void LinuxInput::simulateInput( LT::Network::InputPayload payload, uint16_t hostScreenWidth, uint16_t hostScreenHeight) {
     if (!running_ || !helper_connected_) {
         return;
     }

@@ -11,6 +11,7 @@ WindowsInput::WindowsInput(uint16_t clientScreenWidth, uint16_t clientScreenHeig
     : clientScreenWidth_(clientScreenWidth), clientScreenHeight_(clientScreenHeight) {
     firstPoll_ = true;
     lastPolledMousePos_ = {0, 0};
+    resetSimulationState();
 }
 
 WindowsInput::~WindowsInput() {
@@ -19,7 +20,7 @@ WindowsInput::~WindowsInput() {
 
 bool WindowsInput::start() {
     running_ = true;
-   
+    resetSimulationState();
     keyStatesBitmask_.fill(0);
     pastKeys_.clear();
     currentKeys_.clear();
@@ -158,18 +159,18 @@ std::vector<LocalTether::Network::InputPayload> WindowsInput::pollEvents() {
             rel_x = static_cast<float>(cursorPos.x) / screen_width;
             rel_y = static_cast<float>(cursorPos.y) / screen_height;
             
-            rel_x = max(0.0f, min(1.0f, rel_x));
-            rel_y = max(0.0f, min(1.0f, rel_y));
+            rel_x = std::max(0.0f, std::min(1.0f, rel_x));
+            rel_y = std::max(0.0f, std::min(1.0f, rel_y));
         }
 
         bool significant_move = false;
         if (rel_x != -1.0f) { 
-             if (m_lastSentRelativeX == -1.0f || m_lastSentRelativeY == -1.0f) { // Uses member variable
+             if (m_lastSentRelativeX == -1.0f || m_lastSentRelativeY == -1.0f) { 
                 significant_move = true;
             } else {
-                constexpr float RELATIVE_DEADZONE = 0.005f; 
-                if (std::abs(rel_x - m_lastSentRelativeX) > RELATIVE_DEADZONE || // Uses member variable
-                    std::abs(rel_y - m_lastSentRelativeY) > RELATIVE_DEADZONE) { // Uses member variable
+                constexpr float RELATIVE_DEADZONE = 0.002f; 
+                if (std::abs(rel_x - m_lastSentRelativeX) > RELATIVE_DEADZONE ||
+                    std::abs(rel_y - m_lastSentRelativeY) > RELATIVE_DEADZONE) {
                     significant_move = true;
                 }
             }
@@ -180,30 +181,34 @@ std::vector<LocalTether::Network::InputPayload> WindowsInput::pollEvents() {
         if (GetAsyncKeyState(VK_RBUTTON) & 0x8000) current_buttons |= 0x02; 
         if (GetAsyncKeyState(VK_MBUTTON) & 0x8000) current_buttons |= 0x04; 
 
-        bool buttons_changed = (current_buttons != m_lastSentMouseButtons); // Uses member variable
+        bool buttons_changed = (current_buttons != m_lastSentMouseButtons); 
 
         if (significant_move || buttons_changed) {
-            current_payload.isMouseEvent = true; // Modify the single current_payload
+            current_payload.isMouseEvent = true; 
             if (rel_x != -1.0f) current_payload.relativeX = rel_x;
             if (rel_y != -1.0f) current_payload.relativeY = rel_y;
             current_payload.mouseButtons = current_buttons;
-            events_found = true; // Mark that some event (mouse) has been found
+            current_payload.sourceDeviceType = LocalTether::Network::InputSourceDeviceType::MOUSE_ABSOLUTE;
+            events_found = true; 
             if (rel_x != -1.0f) m_lastSentRelativeX = rel_x; 
             if (rel_y != -1.0f) m_lastSentRelativeY = rel_y;
             m_lastSentMouseButtons = current_buttons;
         }
     }
 
-    if (m_mouseWheelDeltaX != 0 || m_mouseWheelDeltaY != 0) { // Uses member variable
-        current_payload.scrollDeltaX = m_mouseWheelDeltaX;    // Modify the single current_payload
+    if (m_mouseWheelDeltaX != 0 || m_mouseWheelDeltaY != 0) { 
+        current_payload.scrollDeltaX = m_mouseWheelDeltaX;  
         current_payload.scrollDeltaY = m_mouseWheelDeltaY;
         current_payload.isMouseEvent = true; 
-        events_found = true; // Mark that some event (scroll) has been found
+        if (current_payload.sourceDeviceType == LocalTether::Network::InputSourceDeviceType::UNKNOWN) {
+            current_payload.sourceDeviceType = LocalTether::Network::InputSourceDeviceType::MOUSE_ABSOLUTE;
+        }
+        events_found = true; 
         m_mouseWheelDeltaX = 0; 
         m_mouseWheelDeltaY = 0;
     }
 
-    if (events_found) { // If any key, mouse, or scroll event was found
+    if (events_found) { 
         payloads.push_back(current_payload);
     }
 
@@ -294,7 +299,7 @@ double WindowsInput::calculateDistance(POINT a, POINT b) {
 }
 
 
-void WindowsInput::simulateInput(const LocalTether::Network::InputPayload& payload, uint16_t hostScreenWidth, uint16_t hostScreenHeight) {
+void WindowsInput::simulateInput( LocalTether::Network::InputPayload payload, uint16_t hostScreenWidth, uint16_t hostScreenHeight) {
     #ifdef _WIN32
     LocalTether::Utils::Logger::GetInstance().Debug("WindowsInput: Simulating input events.");
 
@@ -391,16 +396,18 @@ void WindowsInput::simulateInput(const LocalTether::Network::InputPayload& paylo
 
         // Position
         if (payload.relativeX != -1.0f && payload.relativeY != -1.0f) {
+            float processedSimX, processedSimY;
+            processSimulatedMouseCoordinates(payload.relativeX, payload.relativeY, payload.sourceDeviceType, processedSimX, processedSimY);
+            LocalTether::Utils::Logger::GetInstance().Debug("WindowsInput: original mouse coordinates processed to (" + std::to_string(payload.relativeX) + ", " + std::to_string(payload.relativeY) + ")");
+            LocalTether::Utils::Logger::GetInstance().Debug("WindowsInput: Simulated mouse coordinates processed to (" + std::to_string(processedSimX) + ", " + std::to_string(processedSimY) + ")");
+            payload.relativeX = processedSimX;
+            payload.relativeY = processedSimY;
             mouseEvent.mi.dx = static_cast<LONG>(payload.relativeX * 65535.0f); // Range 0-65535
             mouseEvent.mi.dy = static_cast<LONG>(payload.relativeY * 65535.0f);
             mouseEvent.mi.dwFlags |= MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE;
             // LocalTether::Utils::Logger::GetInstance().Debug("WindowsInput: Simulating relative move (" + std::to_string(payload.relativeX) + ", " + std::to_string(payload.relativeY) + ")");
         }
 
-        // Buttons (from payload.mouseButtons bitmask)
-        // This requires careful mapping if payload.mouseButtons is different from how keyEvents handles mouse buttons.
-        // If mouse buttons are *only* in keyEvents, this section might not be needed or needs adjustment.
-        // Assuming payload.mouseButtons is a state:
         if ((payload.mouseButtons & 0x01) != (m_simulatedMouseButtonsState & 0x01) ) { // Left button change
             mouseEvent.mi.dwFlags |= ((payload.mouseButtons & 0x01) ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP);
         }
@@ -410,21 +417,19 @@ void WindowsInput::simulateInput(const LocalTether::Network::InputPayload& paylo
         if ((payload.mouseButtons & 0x04) != (m_simulatedMouseButtonsState & 0x04) ) { // Middle button change
             mouseEvent.mi.dwFlags |= ((payload.mouseButtons & 0x04) ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP);
         }
-        // Add XBUTTON1, XBUTTON2 if your payload.mouseButtons supports them
+        
         m_simulatedMouseButtonsState = payload.mouseButtons;
 
-
-        // Scroll
         if (payload.scrollDeltaX != 0) {
             mouseEvent.mi.mouseData = static_cast<DWORD>(payload.scrollDeltaX);
             mouseEvent.mi.dwFlags |= MOUSEEVENTF_HWHEEL;
         }
         if (payload.scrollDeltaY != 0) {
-            mouseEvent.mi.mouseData = static_cast<DWORD>(payload.scrollDeltaY); // Windows uses positive for scroll down, negative for up. Check payload convention.
+            mouseEvent.mi.mouseData = static_cast<DWORD>(payload.scrollDeltaY); 
             mouseEvent.mi.dwFlags |= MOUSEEVENTF_WHEEL;
         }
         
-        if (mouseEvent.mi.dwFlags != 0) { // Only add if there are actual mouse flags set
+        if (mouseEvent.mi.dwFlags != 0) { 
             inputs.push_back(mouseEvent);
         }
     }

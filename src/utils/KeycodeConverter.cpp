@@ -94,29 +94,25 @@ const std::unordered_map<uint8_t, uint16_t> vk_to_evdev_map = {
     {VK_SEPARATOR, KEY_KPCOMMA},
     {VK_LWIN, KEY_LEFTMETA}, {VK_RWIN, KEY_RIGHTMETA}, {VK_APPS, KEY_COMPOSE},
 
-    // Mouse buttons
     {VK_LBUTTON, BTN_LEFT},
     {VK_RBUTTON, BTN_RIGHT},
     {VK_MBUTTON, BTN_MIDDLE},
     {VK_XBUTTON1, BTN_SIDE},
     {VK_XBUTTON2, BTN_EXTRA},
 
-    // Generic Shift, Ctrl, Alt - map to Left versions by default for simulation if specific L/R not given
     {VK_SHIFT, KEY_LEFTSHIFT},
     {VK_CONTROL, KEY_LEFTCTRL},
-    {VK_MENU, KEY_LEFTALT}, // ALT key
+    {VK_MENU, KEY_LEFTALT}, 
 };
 
-} // anonymous namespace
+} 
 
 uint8_t KeycodeConverter::evdevToVk(uint16_t evdevCode) {
     auto it = evdev_to_vk_map.find(evdevCode);
     if (it != evdev_to_vk_map.end()) {
         return it->second;
     }
-    // Handle ASCII printable characters directly if not in map (e.g. KEY_MINUS, KEY_EQUAL etc might be better mapped)
-    // This is a simplification; a full mapping is complex.
-    // For unmapped keys, return 0 or a special "unmapped" VK code.
+
     return 0; 
 }
 

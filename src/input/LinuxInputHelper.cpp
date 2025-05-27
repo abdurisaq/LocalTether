@@ -67,6 +67,7 @@ static std::string G_ACTUAL_SOCKET_PATH;
 static int32_t g_helper_abs_x = 0;
 static int32_t g_helper_abs_y = 0;
 static uint8_t g_helper_mouse_buttons_state = 0;
+static bool g_last_processed_abs_move_was_trackpad = false;
 
 static int32_t g_helper_last_sent_abs_x = 0;
 static int32_t g_helper_last_sent_abs_y = 0;
@@ -77,7 +78,7 @@ static bool g_helper_mouse_state_initialized = false;
 static std::map<int, struct input_absinfo> g_abs_x_info_map;
 static std::map<int, struct input_absinfo> g_abs_y_info_map;
 
-static const int HELPER_MOUSE_DEADZONE_SQUARED = 5 * 5;
+static const int HELPER_MOUSE_DEADZONE_SQUARED = 2 * 2;
 
 static std::map<int, bool> g_device_is_touch_pointer;
 static std::map<int, bool> g_device_touch_is_active;
@@ -88,6 +89,97 @@ static std::map<int, std::optional<int32_t>> g_pending_abs_y_for_fd;
 
 static constexpr size_t VK_KEY_STATE_ARRAY_SIZE = (256 / 8);
 static std::array<uint8_t, VK_KEY_STATE_ARRAY_SIZE> g_helper_vk_key_states_bitmask;
+
+
+static std::atomic<float> g_h_lastSimulatedRelativeX{-1.0f};
+static std::atomic<float> g_h_lastSimulatedRelativeY{-1.0f};
+static std::atomic<float> g_h_anchorDeviceRelativeX{-1.0f};
+static std::atomic<float> g_h_anchorDeviceRelativeY{-1.0f};
+
+static constexpr float G_H_SIMULATION_JUMP_THRESHOLD = 0.02f;
+
+static void helper_reset_simulation_state() {
+    g_h_lastSimulatedRelativeX.store(-1.0f);
+    g_h_lastSimulatedRelativeY.store(-1.0f);
+    g_h_anchorDeviceRelativeX.store(-1.0f);
+    g_h_anchorDeviceRelativeY.store(-1.0f);
+    LT::Utils::Logger::GetInstance().Debug("LinuxInputHelper: Simulation state reset.");
+}
+
+static void helper_process_simulated_mouse_coordinates(float payloadX, float payloadY, LT::Network::InputSourceDeviceType sourceDevice, float& outSimX, float& outSimY) {
+    float lastSimX_val = g_h_lastSimulatedRelativeX.load(std::memory_order_relaxed);
+    float lastSimY_val = g_h_lastSimulatedRelativeY.load(std::memory_order_relaxed);
+    float anchorDevX_val = g_h_anchorDeviceRelativeX.load(std::memory_order_relaxed);
+    float anchorDevY_val = g_h_anchorDeviceRelativeY.load(std::memory_order_relaxed);
+
+    LT::Utils::Logger::GetInstance().Debug(
+        "HelperSimMouseProc START: payload(" + std::to_string(payloadX) + "," + std::to_string(payloadY) +
+        "), lastSim(" + std::to_string(lastSimX_val) + "," + std::to_string(lastSimY_val) +
+        "), anchorDev(" + std::to_string(anchorDevX_val) + "," + std::to_string(anchorDevY_val) + ")"
+    );
+    
+    if (payloadX < 0.0f || payloadY < 0.0f) { // Invalid payload
+        outSimX = (lastSimX_val >= 0.0f) ? lastSimX_val : 0.5f;
+        outSimY = (lastSimY_val >= 0.0f) ? lastSimY_val : 0.5f;
+        LT::Utils::Logger::GetInstance().Debug("HelperSimMouseProc: Invalid payload. Outputting last valid or default. Sim: (" + std::to_string(outSimX) + "," + std::to_string(outSimY) + ")");
+        return;
+    }
+
+    if (sourceDevice == LT::Network::InputSourceDeviceType::TRACKPAD_ABSOLUTE) {
+        LT::Utils::Logger::GetInstance().Debug("HelperSimMouseProc: Applying TRACKPAD_ABSOLUTE logic.");
+        if (lastSimX_val < 0.0f || anchorDevX_val < 0.0f) { // Initial state or after reset for trackpad
+            LT::Utils::Logger::GetInstance().Debug("HelperSimMouseProc: Trackpad initial state or reset.");
+            outSimX = payloadX;
+            outSimY = payloadY;
+            g_h_anchorDeviceRelativeX.store(payloadX, std::memory_order_relaxed);
+            g_h_anchorDeviceRelativeY.store(payloadY, std::memory_order_relaxed);
+            LT::Utils::Logger::GetInstance().Debug("HelperSimMouseProc: Trackpad set outSim to payload, anchor to payload. New Anchor: (" + std::to_string(payloadX) + "," + std::to_string(payloadY) + ")");
+        } else {
+            float deltaPayloadToAnchorX = payloadX - anchorDevX_val;
+            float deltaPayloadToAnchorY = payloadY - anchorDevY_val;
+            float distSqPayloadToAnchor = (deltaPayloadToAnchorX * deltaPayloadToAnchorX) +
+                                          (deltaPayloadToAnchorY * deltaPayloadToAnchorY);
+            float thresholdSq = G_H_SIMULATION_JUMP_THRESHOLD * G_H_SIMULATION_JUMP_THRESHOLD;
+
+            LT::Utils::Logger::GetInstance().Debug(
+                "HelperSimMouseProc: Trackpad comparing payload to anchor. distSqPayloadToAnchor: " + std::to_string(distSqPayloadToAnchor) +
+                ", thresholdSq: " + std::to_string(thresholdSq)
+            );
+
+            if (distSqPayloadToAnchor > thresholdSq) {
+                LT::Utils::Logger::GetInstance().Debug("HelperSimMouseProc: Trackpad FAR from anchor. Cursor stays. New anchor is payload.");
+                outSimX = lastSimX_val;
+                outSimY = lastSimY_val;
+                g_h_anchorDeviceRelativeX.store(payloadX, std::memory_order_relaxed);
+                g_h_anchorDeviceRelativeY.store(payloadY, std::memory_order_relaxed);
+                LT::Utils::Logger::GetInstance().Debug("HelperSimMouseProc: Trackpad New Anchor: (" + std::to_string(payloadX) + "," + std::to_string(payloadY) + ")");
+            } else {
+                LT::Utils::Logger::GetInstance().Debug("HelperSimMouseProc: Trackpad CLOSE to anchor. Applying delta to lastSim.");
+                outSimX = lastSimX_val + deltaPayloadToAnchorX;
+                outSimY = lastSimY_val + deltaPayloadToAnchorY;
+                g_h_anchorDeviceRelativeX.store(payloadX, std::memory_order_relaxed);
+                g_h_anchorDeviceRelativeY.store(payloadY, std::memory_order_relaxed);
+                LT::Utils::Logger::GetInstance().Debug("HelperSimMouseProc: Trackpad New Anchor (updated after drag): (" + std::to_string(payloadX) + "," + std::to_string(payloadY) + ")");
+            }
+        }
+    } else { 
+        LT::Utils::Logger::GetInstance().Debug("HelperSimMouseProc: Applying DIRECT simulation logic for device type: " + std::to_string(static_cast<int>(sourceDevice)));
+        outSimX = payloadX;
+        outSimY = payloadY;
+        if (anchorDevX_val >= 0.0f) { 
+             LT::Utils::Logger::GetInstance().Debug("HelperSimMouseProc: Non-trackpad input, resetting device anchors.");
+             g_h_anchorDeviceRelativeX.store(-1.0f, std::memory_order_relaxed);
+             g_h_anchorDeviceRelativeY.store(-1.0f, std::memory_order_relaxed);
+        }
+    }
+
+    outSimX = std::max(0.0f, std::min(1.0f, outSimX));
+    outSimY = std::max(0.0f, std::min(1.0f, outSimY));
+
+    g_h_lastSimulatedRelativeX.store(outSimX, std::memory_order_relaxed);
+    g_h_lastSimulatedRelativeY.store(outSimY, std::memory_order_relaxed);
+    LT::Utils::Logger::GetInstance().Debug("HelperSimMouseProc END: Final outSim(" + std::to_string(outSimX) + "," + std::to_string(outSimY) + "), stored as lastSim.");
+}
 
 static void update_helper_vk_key_state(uint8_t vk_code, bool pressed) {
     if (vk_code == 0) return;
@@ -453,8 +545,16 @@ void poll_events_once_and_send(asio::local::stream_protocol::socket& target_sock
                     }
                 } else if (ev.type == EV_REL) {
                     if (g_helper_mouse_state_initialized) {
-                        if (ev.code == REL_X) { g_helper_abs_x += ev.value; raw_mouse_moved_this_cycle = true; }
-                        else if (ev.code == REL_Y) { g_helper_abs_y += ev.value; raw_mouse_moved_this_cycle = true; }
+                        if (ev.code == REL_X) { 
+                            g_helper_abs_x += ev.value;
+                            raw_mouse_moved_this_cycle = true; 
+                            g_last_processed_abs_move_was_trackpad = false;
+                        }
+                        else if (ev.code == REL_Y) { 
+                            g_helper_abs_y += ev.value;
+                            raw_mouse_moved_this_cycle = true;
+                            g_last_processed_abs_move_was_trackpad = false;
+                         }
                     }
                     if (ev.code == REL_WHEEL) { current_payload.scrollDeltaY += static_cast<int16_t>(ev.value); }
                     else if (ev.code == REL_HWHEEL) { current_payload.scrollDeltaX += static_cast<int16_t>(ev.value); }
@@ -463,7 +563,7 @@ void poll_events_once_and_send(asio::local::stream_protocol::socket& target_sock
                     if (g_helper_mouse_state_initialized) {
                         bool is_touch_pointer_dev = g_device_is_touch_pointer.count(current_fd) && g_device_is_touch_pointer[current_fd];
                         bool touch_is_active_for_dev = g_device_touch_is_active.count(current_fd) && g_device_touch_is_active[current_fd];
-
+                        bool abs_event_caused_move = false;
                         if (is_touch_pointer_dev && touch_is_active_for_dev) {
                             if (ev.code == ABS_X || (ev.code == ABS_MT_POSITION_X && g_abs_x_info_map.count(current_fd))) {
                                 g_pending_abs_x_for_fd[current_fd] = ev.value;
@@ -474,16 +574,27 @@ void poll_events_once_and_send(asio::local::stream_protocol::socket& target_sock
                             if (ev.code == ABS_X || (ev.code == ABS_MT_POSITION_X && g_abs_x_info_map.count(current_fd))) {
                                  const auto it = g_abs_x_info_map.find(current_fd);
                                  if (it != g_abs_x_info_map.end()) {
+                                    int32_t old_abs_x = g_helper_abs_x;
                                     g_helper_abs_x = scale_abs_value_to_screen(ev.value, &it->second, g_client_screen_width);
-                                    raw_mouse_moved_this_cycle = true;
+                                    if (g_helper_abs_x != old_abs_x) {
+                                        raw_mouse_moved_this_cycle = true;
+                                        abs_event_caused_move = true;
+                                    }
                                  }
                             } else if (ev.code == ABS_Y || (ev.code == ABS_MT_POSITION_Y && g_abs_y_info_map.count(current_fd))) {
                                 const auto it = g_abs_y_info_map.find(current_fd);
                                 if (it != g_abs_y_info_map.end()) {
-                                    g_helper_abs_y = scale_abs_value_to_screen(ev.value, &it->second, g_client_screen_height);
-                                    raw_mouse_moved_this_cycle = true;
+                                   int32_t old_abs_y = g_helper_abs_y;
+                                   g_helper_abs_y = scale_abs_value_to_screen(ev.value, &it->second, g_client_screen_height);
+                                   if (g_helper_abs_y != old_abs_y) {
+                                       raw_mouse_moved_this_cycle = true;
+                                       abs_event_caused_move = true;
+                                   }
                                 }
                             }
+                        }
+                        if (abs_event_caused_move) {
+                           g_last_processed_abs_move_was_trackpad = is_touch_pointer_dev;
                         }
                     }
                 }
@@ -525,11 +636,17 @@ void poll_events_once_and_send(asio::local::stream_protocol::socket& target_sock
                             }
                             
                             if (g_device_screen_coords_at_touch_start[current_fd].has_value()) {
+                                int32_t old_abs_x = g_helper_abs_x;
+                                int32_t old_abs_y = g_helper_abs_y;
                                 g_helper_abs_x = g_device_screen_coords_at_touch_start[current_fd]->first + static_cast<int32_t>(screen_delta_x);
                                 g_helper_abs_y = g_device_screen_coords_at_touch_start[current_fd]->second + static_cast<int32_t>(screen_delta_y);
-                                raw_mouse_moved_this_cycle = true;
+                                 if (g_helper_abs_x != old_abs_x || g_helper_abs_y != old_abs_y) {
+                                    raw_mouse_moved_this_cycle = true;
+                                    g_last_processed_abs_move_was_trackpad = true; 
+                                }
                             }
                         }
+                        
                     }
                     g_pending_abs_x_for_fd[current_fd] = std::nullopt;
                     g_pending_abs_y_for_fd[current_fd] = std::nullopt;
@@ -577,6 +694,16 @@ void poll_events_once_and_send(asio::local::stream_protocol::socket& target_sock
                         g_helper_last_sent_mouse_buttons = g_helper_mouse_buttons_state;
                     }
 
+                    if (current_payload.isMouseEvent && (send_mouse_update_this_report || key_event_is_mouse_button)) {
+                        if (g_last_processed_abs_move_was_trackpad && raw_mouse_moved_this_cycle) {
+                            current_payload.sourceDeviceType = LT::Network::InputSourceDeviceType::TRACKPAD_ABSOLUTE;
+                        } else { 
+                            current_payload.sourceDeviceType = LT::Network::InputSourceDeviceType::MOUSE_ABSOLUTE;
+                        }
+                    } else if (current_payload.isMouseEvent) {
+                         current_payload.sourceDeviceType = LT::Network::InputSourceDeviceType::MOUSE_ABSOLUTE;
+                    }
+
                     if (!current_payload.keyEvents.empty() || current_payload.isMouseEvent) {
                         std::vector<uint8_t> buffer = LT::Utils::serializeInputPayload(current_payload);
                         asio::error_code ec_write;
@@ -601,7 +728,7 @@ void poll_events_once_and_send(asio::local::stream_protocol::socket& target_sock
     }
 }
 
-void simulate_input_event(const LT::Network::InputPayload& payload) {
+void simulate_input_event(LT::Network::InputPayload payload) {
     if (!g_uinput_device) {
         LT::Utils::Logger::GetInstance().Warning("Simulating: uinput device not available.");
         return;
@@ -619,6 +746,13 @@ void simulate_input_event(const LT::Network::InputPayload& payload) {
 
     if (payload.isMouseEvent && payload.relativeX != -1.0f && payload.relativeY != -1.0f) {
         if (g_client_screen_width > 0 && g_client_screen_height > 0) {
+
+            float processedSimX, processedSimY;
+            helper_process_simulated_mouse_coordinates(payload.relativeX, payload.relativeY, payload.sourceDeviceType, processedSimX, processedSimY);
+            payload.relativeX = processedSimX;
+            payload.relativeY = processedSimY;
+
+
             int32_t target_abs_x = static_cast<int32_t>(payload.relativeX * (g_client_screen_width -1) );
             int32_t target_abs_y = static_cast<int32_t>(payload.relativeY * (g_client_screen_height -1));
 
@@ -658,11 +792,13 @@ void handle_ipc_command(const char* data, size_t length, asio::local::stream_pro
             break;
         }
         case IPCCommandType::PauseStream:
-            g_input_polling_paused = true;
+            g_input_polling_paused.store(true, std::memory_order_relaxed);
             LT::Utils::Logger::GetInstance().Info("Input Helper: Input polling PAUSED.");
             break;
         case IPCCommandType::ResumeStream:
-            g_input_polling_paused = false;
+            if (g_input_polling_paused.exchange(false, std::memory_order_relaxed) == true) {
+                 helper_reset_simulation_state();
+            }
             LT::Utils::Logger::GetInstance().Info("Input Helper: Input polling RESUMED.");
             break;
         case IPCCommandType::Shutdown:
@@ -747,6 +883,7 @@ int runInputHelperMode(int argc, char **argv) {
             LT::Utils::Logger::GetInstance().Info("Input Helper: Input polling thread finished.");
         });
 
+        helper_reset_simulation_state();
         std::array<char, 2048> ipc_read_buffer_local;
         while (g_helper_running.load(std::memory_order_relaxed)) {
             asio::error_code error;

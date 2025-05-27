@@ -27,7 +27,7 @@ public:
     void stop() override;
 
     std::vector<LocalTether::Network::InputPayload> pollEvents() override;
-    void simulateInput(const LocalTether::Network::InputPayload& payload, uint16_t hostScreenWidth, uint16_t hostScreenHeight) override;
+    void simulateInput(LocalTether::Network::InputPayload payload, uint16_t hostScreenWidth, uint16_t hostScreenHeight) override;
 
     void setInputPaused(bool paused);
     bool isInputPaused() const;

@@ -42,8 +42,15 @@ struct HandshakePayload {
     uint16_t hostScreenHeight = 0;
 };
 
+enum class InputSourceDeviceType : uint8_t {
+    UNKNOWN = 0,
+    MOUSE_ABSOLUTE = 2,     
+    TRACKPAD_ABSOLUTE = 3 
+};
+
 struct InputPayload {
     std::vector<KeyEvent> keyEvents;  
+    InputSourceDeviceType sourceDeviceType = InputSourceDeviceType::UNKNOWN;
     bool isMouseEvent = false;      
     float relativeX = -1.0f;  
     float relativeY = -1.0f;      
