@@ -29,6 +29,7 @@
 #include <optional>
 #include <algorithm>
 #include <array>
+#include <sys/ioctl.h>
 
 namespace LT = LocalTether;
 
@@ -42,7 +43,9 @@ enum class IPCCommandType : uint8_t {
     SimulateInput = 1,
     PauseStream = 2,
     ResumeStream = 3,
-    Shutdown = 4
+    Shutdown = 4,
+    GrabDevices = 5,
+    UngrabDevices = 6
 };
 
 const char* SHM_NAME = "/localtether_shm_helper_info";
@@ -96,6 +99,7 @@ static std::atomic<float> g_h_anchorDeviceRelativeX{-1.0f};
 static std::atomic<float> g_h_anchorDeviceRelativeY{-1.0f};
 
 static constexpr float G_H_SIMULATION_JUMP_THRESHOLD = 0.02f;
+static std::atomic<bool> g_are_devices_grabbed{false};
 
 static void helper_reset_simulation_state() {
     g_h_lastSimulatedRelativeX.store(-1.0f);
@@ -243,8 +247,56 @@ void write_info_to_shared_memory() {
     LT::Utils::Logger::GetInstance().Info("Input Helper: PID " + std::to_string(getpid()) + " and socket '" + G_ACTUAL_SOCKET_PATH + "' written to SHM.");
 }
 
+static void grab_or_ungrab_all_devices(bool grab) {
+    if (g_evdev_fds.empty()) {
+        LT::Utils::Logger::GetInstance().Info("Input Helper: No devices to " + std::string(grab ? "grab" : "ungrab") + ".");
+        g_are_devices_grabbed.store(false, std::memory_order_relaxed);
+        return;
+    }
+
+    LT::Utils::Logger::GetInstance().Info(std::string("Input Helper: Attempting to ") + (grab ? "GRAB" : "UNGRAB") + " " + std::to_string(g_evdev_fds.size()) + " devices.");
+    int success_count = 0;
+    int fail_count = 0;
+    std::vector<struct libevdev*> temp_devs_for_name;
+
+    for (int fd_idx = 0; fd_idx < g_evdev_fds.size(); ++fd_idx) {
+        int fd = g_evdev_fds[fd_idx];
+        struct libevdev* temp_dev = nullptr;
+        if (fd_idx < g_evdev_devices.size()) {
+             temp_dev = g_evdev_devices[fd_idx];
+        }
+
+        if (ioctl(fd, EVIOCGRAB, (void*)(grab ? 1 : 0)) == 0) {
+            success_count++;
+        } else {
+            std::string dev_name_str = "unknown device";
+            if (temp_dev) {
+                const char* name = libevdev_get_name(temp_dev);
+                if (name) dev_name_str = name;
+            }
+            LT::Utils::Logger::GetInstance().Warning("Input Helper: Failed to " + std::string(grab ? "grab" : "ungrab") + " device fd " + std::to_string(fd) + " (" + dev_name_str + "): " + strerror(errno));
+            fail_count++;
+        }
+    }
+
+    if (success_count > 0 || g_evdev_fds.empty()) {
+         g_are_devices_grabbed.store(grab, std::memory_order_relaxed);
+    }
+
+    if (fail_count == 0 && success_count > 0) {
+        LT::Utils::Logger::GetInstance().Info(std::string("Input Helper: Successfully ") + (grab ? "grabbed" : "ungrabbed") + " all " + std::to_string(success_count) + " devices.");
+    } else if (success_count > 0 && fail_count > 0) {
+        LT::Utils::Logger::GetInstance().Warning(std::string("Input Helper: Partially ") + (grab ? "grabbed" : "ungrabbed") + " devices. Success: " + std::to_string(success_count) + ", Failed: " + std::to_string(fail_count));
+    } else if (fail_count > 0 && success_count == 0 && !g_evdev_fds.empty()){
+         LT::Utils::Logger::GetInstance().Error(std::string("Input Helper: Failed to ") + (grab ? "grab" : "ungrab") + " any devices.");
+    }
+}
+
 void cleanup_helper_resources() {
     LT::Utils::Logger::GetInstance().Info("Input Helper: Cleaning up resources...");
+    if (g_are_devices_grabbed.load(std::memory_order_relaxed)) {
+        grab_or_ungrab_all_devices(false);
+    }
     if (g_main_app_socket_ptr && g_main_app_socket_ptr->is_open()) {
         asio::error_code ec;
         g_main_app_socket_ptr->shutdown(asio::local::stream_protocol::socket::shutdown_both, ec);
@@ -682,7 +734,6 @@ void poll_events_once_and_send(asio::local::stream_protocol::socket& target_sock
                         }
                     }
 
-
                     if (!current_payload.keyEvents.empty() || current_payload.isMouseEvent) {
                         std::vector<uint8_t> buffer = LT::Utils::serializeInputPayload(current_payload);
                         asio::error_code ec_write;
@@ -772,6 +823,12 @@ void handle_ipc_command(const char* data, size_t length, asio::local::stream_pro
         case IPCCommandType::ResumeStream:
             LT::Utils::Logger::GetInstance().Info("Input Helper: ResumeStream command received (IGNORED - helper always polls).");
             helper_reset_simulation_state();
+            break;
+        case IPCCommandType::GrabDevices:
+            grab_or_ungrab_all_devices(true);
+            break;
+        case IPCCommandType::UngrabDevices:
+            grab_or_ungrab_all_devices(false);
             break;
         case IPCCommandType::Shutdown:
             LT::Utils::Logger::GetInstance().Info("Input Helper: Shutdown command received.");

@@ -62,9 +62,11 @@ private:
     
     enum class IPCCommandType : uint8_t {
         SimulateInput = 1,
-        PauseStream = 2,
-        ResumeStream = 3,
-        Shutdown = 4
+        PauseStream = 2,  
+        ResumeStream = 3, 
+        Shutdown = 4,
+        GrabDevices = 5,  
+        UngrabDevices = 6  
     };
     void sendCommandToHelper(IPCCommandType cmdType, const std::vector<uint8_t>& data = {});
     void sendPayloadToHelper(IPCCommandType cmdType, const LocalTether::Network::InputPayload& payload);

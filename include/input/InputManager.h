@@ -5,7 +5,8 @@
 #include <memory>
 #include <atomic>
 #include "utils/Logger.h"
-
+#include "utils/Config.h"
+#include "utils/KeycodeConverter.h"
 #ifdef _WIN32
 #ifndef NOMINMAX 
     #define NOMINMAX
@@ -15,6 +16,9 @@ namespace LocalTether::Input {
 
 class InputManager {
 public:
+    InputManager() { 
+        loadAndSetPauseCombo();
+    }
     virtual ~InputManager() = default;
 
     virtual bool start() = 0;
@@ -40,6 +44,7 @@ public:
     virtual bool isRunning() const = 0;
 
     protected:
+    
     std::vector<uint8_t> pause_key_combo_;
     static std::atomic<bool> input_globally_paused_; 
 
@@ -52,6 +57,19 @@ public:
     
 
     void processSimulatedMouseCoordinates(float payloadX, float payloadY, Network::InputSourceDeviceType sourceDeviceType, float& outSimX, float& outSimY) ;
+
+    void loadAndSetPauseCombo() {
+        auto& config = LocalTether::Utils::Config::GetInstance();
+        std::vector<uint8_t> loaded_combo = config.Get<std::vector<uint8_t>>(LocalTether::Utils::Config::GetPauseComboKey(), {});
+
+        if (loaded_combo.empty()) {
+            LocalTether::Utils::Logger::GetInstance().Info("InputManager: No pause combo in config or config was empty. Setting default: CTRL + 0");
+            pause_key_combo_ = {VK_CONTROL, static_cast<uint8_t>('0')};
+        } else {
+            pause_key_combo_ = loaded_combo; 
+        }
+    }
+
 };
 
 

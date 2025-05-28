@@ -71,7 +71,7 @@ void InputManager::processSimulatedMouseCoordinates(float payloadX, float payloa
                 LocalTether::Utils::Logger::GetInstance().Debug("SimMouseProc: Trackpad New Anchor (updated after drag): (" + std::to_string(payloadX) + "," + std::to_string(payloadY) + ")");
             }
         }
-    } else { // MOUSE_ABSOLUTE, UNKNOWN
+    } else { 
         LocalTether::Utils::Logger::GetInstance().Debug("SimMouseProc: Applying DIRECT simulation logic for device type: " + std::to_string(static_cast<int>(sourceDeviceType)));
         outSimX = payloadX;
         outSimY = payloadY;
@@ -89,6 +89,9 @@ void InputManager::processSimulatedMouseCoordinates(float payloadX, float payloa
     m_lastSimulatedRelativeY.store(outSimY, std::memory_order_relaxed);
     LocalTether::Utils::Logger::GetInstance().Debug("SimMouseProc END: Final outSim(" + std::to_string(outSimX) + "," + std::to_string(outSimY) + "), stored as lastSim.");
 }
+
+
+
 
 std::atomic<bool> LocalTether::Input::InputManager::input_globally_paused_{false};
 }

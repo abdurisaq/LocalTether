@@ -24,8 +24,8 @@ namespace LocalTether::Utils {
 
         bool HasKey(const std::string& key);
 
-        static const std::string PAUSE_COMBO_KEY;
-        static const std::string default_config_filepath_;
+        static const std::string& GetPauseComboKey();
+        static const std::string& GetDefaultConfigFilePath();
         
     private:
         Config();

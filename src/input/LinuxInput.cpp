@@ -288,6 +288,7 @@ bool LinuxInput::connectToHelper() {
                 LT::Utils::Logger::GetInstance().Info("LinuxInput: IPC thread finished.");
             });
 
+            sendCommandToHelper(IPCCommandType::GrabDevices);
             readFromHelperLoop();
             close_and_unmap_shared_memory();  
             return true;
@@ -588,12 +589,15 @@ void LinuxInput::setInputPaused(bool paused) {
         return; 
     }
 
+    
     local_pause_active_.store(paused, std::memory_order_relaxed);
     
 
     if (paused) {
+        sendCommandToHelper(IPCCommandType::UngrabDevices);
         LT::Utils::Logger::GetInstance().Info("LinuxInput: Input processing PAUSED. Commanding helper.");
     } else {
+        sendCommandToHelper(IPCCommandType::GrabDevices);
         LT::Utils::Logger::GetInstance().Info("LinuxInput: Input processing RESUMED. Commanding helper.");
     }
 }

@@ -10,7 +10,7 @@ PauseSettingsPanel::PauseSettingsPanel() {
      
      
     auto& config = LocalTether::Utils::Config::GetInstance();
-    std::vector<uint8_t> loaded_combo = config.Get(LocalTether::Utils::Config::PAUSE_COMBO_KEY, std::vector<uint8_t>{});
+    std::vector<uint8_t> loaded_combo = config.Get(LocalTether::Utils::Config::GetPauseComboKey(), std::vector<uint8_t>{});
     
     ctrl_modifier_ = false;
     shift_modifier_ = false;
@@ -158,7 +158,7 @@ void PauseSettingsPanel::Show(bool* p_open, LocalTether::Input::InputManager* in
 
         if (!currently_editing_combo_.empty()) {
             inputManager->setPauseKeyCombo(currently_editing_combo_);
-            config.Set(LocalTether::Utils::Config::PAUSE_COMBO_KEY, currently_editing_combo_);
+            config.Set(LocalTether::Utils::Config::GetPauseComboKey(), currently_editing_combo_);
             config.SaveToFile();  
             LocalTether::Utils::Logger::GetInstance().Info("UI: Pause combo applied and saved: " + comboToString(currently_editing_combo_));
         } else {
@@ -169,7 +169,7 @@ void PauseSettingsPanel::Show(bool* p_open, LocalTether::Input::InputManager* in
     if (ImGui::Button("Clear Active Combo")) {
         std::vector<uint8_t> empty_combo;
         inputManager->setPauseKeyCombo(empty_combo);
-        config.Set(LocalTether::Utils::Config::PAUSE_COMBO_KEY, empty_combo);
+        config.Set(LocalTether::Utils::Config::GetPauseComboKey(), empty_combo);
         config.SaveToFile();  
         
         ctrl_modifier_ = false;
