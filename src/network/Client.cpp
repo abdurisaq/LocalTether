@@ -140,7 +140,7 @@ void Client::startInputLogging() {
 
     if (!inputManager_) {  
         LocalTether::Utils::Logger::GetInstance().Info("Creating new InputManager for input logging.");
-        inputManager_ = LocalTether::Input::createInputManager(localScreenWidth_, localScreenHeight_);
+        inputManager_ = LocalTether::Input::createInputManager(localScreenWidth_, localScreenHeight_,(role_ == ClientRole::Host));
     } else {
         LocalTether::Utils::Logger::GetInstance().Info("Reusing existing InputManager for input logging.");
     }
@@ -405,7 +405,7 @@ void Client::handleMessage(const Message& message) {
 
             if (role_ == ClientRole::Host || role_ == ClientRole::Receiver || role_ == ClientRole::Broadcaster) {
                 if (!inputManager_) {
-                    inputManager_ = LocalTether::Input::createInputManager(localScreenWidth_, localScreenHeight_);
+                    inputManager_ = LocalTether::Input::createInputManager(localScreenWidth_, localScreenHeight_,(role_ == ClientRole::Host));
                 }
                 if (inputManager_) {
                     if (inputManager_->start()) {

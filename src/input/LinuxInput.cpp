@@ -94,9 +94,9 @@ std::string LinuxInput::getExecutablePath() {
     return "";
 }
 
-LinuxInput::LinuxInput(uint16_t clientScreenWidth, uint16_t clientScreenHeight)
+LinuxInput::LinuxInput(uint16_t clientScreenWidth, uint16_t clientScreenHeight,bool is_host_mode)
     : clientScreenWidth_(clientScreenWidth), clientScreenHeight_(clientScreenHeight),
-      ipc_socket_(ipc_io_context_), m_lastSentHostAbsX(-1),m_lastSentHostAbsY(-1) { 
+      ipc_socket_(ipc_io_context_), m_lastSentHostAbsX(-1),m_lastSentHostAbsY(-1), is_host_mode_(is_host_mode) { 
     LT::Utils::Logger::GetInstance().Info("LinuxInput initialized for client screen: " + std::to_string(clientScreenWidth_) + "x" + std::to_string(clientScreenHeight_));
 }
 
@@ -288,7 +288,13 @@ bool LinuxInput::connectToHelper() {
                 LT::Utils::Logger::GetInstance().Info("LinuxInput: IPC thread finished.");
             });
 
-            sendCommandToHelper(IPCCommandType::GrabDevices);
+            if(is_host_mode_) {
+                LT::Utils::Logger::GetInstance().Info("LinuxInput: Host mode detected. Grabbing devices from helper.");
+                sendCommandToHelper(IPCCommandType::GrabDevices);
+            } else {
+                LT::Utils::Logger::GetInstance().Info("LinuxInput: Client mode detected. Ungrabbing devices from helper.");
+            }
+            
             readFromHelperLoop();
             close_and_unmap_shared_memory();  
             return true;
@@ -592,13 +598,14 @@ void LinuxInput::setInputPaused(bool paused) {
     
     local_pause_active_.store(paused, std::memory_order_relaxed);
     
-
-    if (paused) {
-        sendCommandToHelper(IPCCommandType::UngrabDevices);
-        LT::Utils::Logger::GetInstance().Info("LinuxInput: Input processing PAUSED. Commanding helper.");
-    } else {
-        sendCommandToHelper(IPCCommandType::GrabDevices);
-        LT::Utils::Logger::GetInstance().Info("LinuxInput: Input processing RESUMED. Commanding helper.");
+    if(is_host_mode_){
+        if (paused) {
+            sendCommandToHelper(IPCCommandType::UngrabDevices);
+            LT::Utils::Logger::GetInstance().Info("LinuxInput: Input processing PAUSED. Commanding helper.");
+        } else {
+            sendCommandToHelper(IPCCommandType::GrabDevices);
+            LT::Utils::Logger::GetInstance().Info("LinuxInput: Input processing RESUMED. Commanding helper.");
+        }
     }
 }
 

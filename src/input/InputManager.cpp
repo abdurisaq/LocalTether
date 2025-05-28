@@ -9,13 +9,13 @@
 namespace LocalTether::Input {
 
 
-std::unique_ptr<InputManager> createInputManager(uint16_t clientScreenWidth, uint16_t clientScreenHeight) {
+std::unique_ptr<InputManager> createInputManager(uint16_t clientScreenWidth, uint16_t clientScreenHeight,bool is_host_mode) {
 #ifdef _WIN32
     LocalTether::Utils::Logger::GetInstance().Info("Creating WindowsInput manager for client screen: " + std::to_string(clientScreenWidth) + "x" + std::to_string(clientScreenHeight));
-    return std::make_unique<WindowsInput>(clientScreenWidth, clientScreenHeight);
+    return std::make_unique<WindowsInput>(clientScreenWidth, clientScreenHeight,is_host_mode);
 #else
     LocalTether::Utils::Logger::GetInstance().Info("Creating LinuxInput manager for client screen: " + std::to_string(clientScreenWidth) + "x" + std::to_string(clientScreenHeight));
-    return std::make_unique<LinuxInput>(clientScreenWidth, clientScreenHeight);
+    return std::make_unique<LinuxInput>(clientScreenWidth, clientScreenHeight,is_host_mode);
 #endif
 }
 

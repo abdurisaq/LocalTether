@@ -257,16 +257,24 @@ static void grab_or_ungrab_all_devices(bool grab) {
     LT::Utils::Logger::GetInstance().Info(std::string("Input Helper: Attempting to ") + (grab ? "GRAB" : "UNGRAB") + " " + std::to_string(g_evdev_fds.size()) + " devices.");
     int success_count = 0;
     int fail_count = 0;
-    std::vector<struct libevdev*> temp_devs_for_name;
+     
 
     for (int fd_idx = 0; fd_idx < g_evdev_fds.size(); ++fd_idx) {
         int fd = g_evdev_fds[fd_idx];
         struct libevdev* temp_dev = nullptr;
-        if (fd_idx < g_evdev_devices.size()) {
+        if (fd_idx < g_evdev_devices.size()) {  
              temp_dev = g_evdev_devices[fd_idx];
         }
 
-        if (ioctl(fd, EVIOCGRAB, (void*)(grab ? 1 : 0)) == 0) {
+        if (temp_dev) {
+            const char* current_dev_name = libevdev_get_name(temp_dev);
+            if (current_dev_name && strcmp(current_dev_name, "LocalTether Virtual Input") == 0) {
+                LT::Utils::Logger::GetInstance().Info("Input Helper: Skipping " + std::string(grab ? "grab" : "ungrab") + " for virtual device: " + std::string(current_dev_name));
+                continue;  
+            }
+        }
+        
+        if (ioctl(fd, EVIOCGRAB, grab ? 1 : 0) == 0) {
             success_count++;
         } else {
             std::string dev_name_str = "unknown device";
@@ -279,16 +287,40 @@ static void grab_or_ungrab_all_devices(bool grab) {
         }
     }
 
-    if (success_count > 0 || g_evdev_fds.empty()) {
+    if (success_count > 0 || g_evdev_fds.empty()) {  
          g_are_devices_grabbed.store(grab, std::memory_order_relaxed);
+    } else if (fail_count > 0 && success_count == 0 && !g_evdev_fds.empty()) {
+         
+         
     }
 
+
     if (fail_count == 0 && success_count > 0) {
-        LT::Utils::Logger::GetInstance().Info(std::string("Input Helper: Successfully ") + (grab ? "grabbed" : "ungrabbed") + " all " + std::to_string(success_count) + " devices.");
+        LT::Utils::Logger::GetInstance().Info(std::string("Input Helper: Successfully ") + (grab ? "grabbed" : "ungrabbed") + " all " + std::to_string(success_count) + " targeted devices.");
     } else if (success_count > 0 && fail_count > 0) {
-        LT::Utils::Logger::GetInstance().Warning(std::string("Input Helper: Partially ") + (grab ? "grabbed" : "ungrabbed") + " devices. Success: " + std::to_string(success_count) + ", Failed: " + std::to_string(fail_count));
+        LT::Utils::Logger::GetInstance().Warning(std::string("Input Helper: Partially ") + (grab ? "grabbed" : "ungrabbed") + " targeted devices. Success: " + std::to_string(success_count) + ", Failed: " + std::to_string(fail_count));
     } else if (fail_count > 0 && success_count == 0 && !g_evdev_fds.empty()){
-         LT::Utils::Logger::GetInstance().Error(std::string("Input Helper: Failed to ") + (grab ? "grab" : "ungrab") + " any devices.");
+          
+        bool all_skipped = true;
+        for (int i = 0; i < g_evdev_fds.size(); ++i) {
+            if (i < g_evdev_devices.size()) {
+                const char* name = libevdev_get_name(g_evdev_devices[i]);
+                if (!name || strcmp(name, "LocalTether Virtual Input") != 0) {
+                    all_skipped = false;
+                    break;
+                }
+            } else {
+                all_skipped = false;  
+                break;
+            }
+        }
+        if (!all_skipped) {
+            LT::Utils::Logger::GetInstance().Error(std::string("Input Helper: Failed to ") + (grab ? "grab" : "ungrab") + " any targeted devices.");
+        } else if (g_evdev_fds.empty()){
+             LT::Utils::Logger::GetInstance().Info("Input Helper: No devices to " + std::string(grab ? "grab" : "ungrab") + ".");
+        }
+    } else if (success_count == 0 && fail_count == 0 && !g_evdev_fds.empty()) {
+        LT::Utils::Logger::GetInstance().Info("Input Helper: All devices were skipped (e.g. only virtual device present or matched). No grab/ungrab action taken on physical devices.");
     }
 }
 
@@ -759,8 +791,10 @@ void poll_events_once_and_send(asio::local::stream_protocol::socket& target_sock
 }
 
 void simulate_input_event(LT::Network::InputPayload payload) {
+
     if (!g_uinput_device) {
         LT::Utils::Logger::GetInstance().Warning("Simulating: uinput device not available.");
+        
         return;
     }
 
@@ -802,6 +836,7 @@ void simulate_input_event(LT::Network::InputPayload payload) {
     }
 
     libevdev_uinput_write_event(g_uinput_device, EV_SYN, SYN_REPORT, 0);
+
 }
 
 void handle_ipc_command(const char* data, size_t length, asio::local::stream_protocol::socket& source_socket) {

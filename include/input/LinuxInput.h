@@ -20,7 +20,7 @@ namespace LocalTether::Input {
 
 class LinuxInput : public InputManager {
 public:
-    LinuxInput(uint16_t clientScreenWidth, uint16_t clientScreenHeight);
+    LinuxInput(uint16_t clientScreenWidth, uint16_t clientScreenHeight,bool is_host_mode);
     ~LinuxInput() override;
 
     bool start() override;
@@ -48,7 +48,7 @@ public:
     }
 
 private:
-
+    bool is_host_mode_;
     std::thread m_init_thread_; 
     std::atomic<bool> m_init_in_progress_{false}; 
     std::atomic<bool> m_stop_requested_{false}; 

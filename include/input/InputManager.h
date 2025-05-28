@@ -73,6 +73,6 @@ public:
 };
 
 
-std::unique_ptr<InputManager> createInputManager(uint16_t clientScreenWidth, uint16_t clientScreenHeight);
+std::unique_ptr<InputManager> createInputManager(uint16_t clientScreenWidth, uint16_t clientScreenHeight,bool is_host_mode);
 
 }
