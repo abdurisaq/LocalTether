@@ -13,5 +13,6 @@ void ShowJoinSetupPanel();
 void ShowConnectingModal();
 void ShowHostDashboard(); 
 void ShowClientDashboard();
+void ShowGeneratingServerAssetsPanel();
 
 }

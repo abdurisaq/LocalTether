@@ -7,6 +7,7 @@
 
 namespace LocalTether::Utils {
     enum class LogLevel {
+        Trace,
         Debug,
         Info,
         Warning,
@@ -24,7 +25,7 @@ namespace LocalTether::Utils {
         void Warning(const std::string& message);
         void Error(const std::string& message);
         void Critical(const std::string& message);
-        
+        void Trace(const std::string& message);
        
         const std::vector<std::string>& GetLogs() const;
 

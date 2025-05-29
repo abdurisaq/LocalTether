@@ -56,6 +56,9 @@ namespace LocalTether::Utils {
     void Logger::Critical(const std::string& message) {
         Log(message, LogLevel::Critical);
     }
+    void Logger::Trace(const std::string& message) {
+        Log(message, LogLevel::Trace);
+    }
     
     const std::vector<std::string>& Logger::GetLogs() const {
         return logs;
@@ -91,6 +94,8 @@ namespace LocalTether::Utils {
                 return "ERROR";
             case LogLevel::Critical:
                 return "CRITICAL";
+            case LogLevel::Trace:
+                return "TRACE";
             default:
                 return "UNKNOWN";
         }

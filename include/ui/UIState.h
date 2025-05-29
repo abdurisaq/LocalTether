@@ -23,6 +23,7 @@ namespace LocalTether::UI {
     enum class AppMode {
         None,
         HostSetup,
+        GeneratingServerAssets,
         JoinSetup,
         Connecting,
         ConnectedAsHost,
@@ -32,4 +33,18 @@ namespace LocalTether::UI {
 
     LocalTether::Network::Client& getClient();
     LocalTether::Network::Server& getServer();
+
+    void resetServerInstance();
+    void resetClientInstance();
+    LocalTether::Network::Server* getServerPtr();
+
+    void initializeNetwork();
+    void cleanupNetwork();
+
+
+    extern std::atomic<bool> server_setup_in_progress;
+    extern std::atomic<bool> server_setup_success;
+    extern std::string server_setup_error_message;
+    extern std::mutex server_setup_mutex;
+    extern std::thread server_setup_thread;
 }

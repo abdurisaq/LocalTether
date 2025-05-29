@@ -61,7 +61,7 @@ if (!(Test-Path $imguiDir)) {
     Pop-Location
 }
 
-vcpkg install asio:x64-windows-static sdl2:x64-windows-static openssl:x64-windows-static glad:x64-windows-static
+vcpkg install asio:x64-windows-static sdl2:x64-windows-static openssl:x64-windows-static glad:x64-windows-static cereal:x64-windows-static
 
 New-Item -ItemType Directory -Force -Path $buildDir | Out-Null
 Push-Location $buildDir

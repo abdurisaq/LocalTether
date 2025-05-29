@@ -10,8 +10,11 @@
 #include "input/InputManager.h"
 #include "input/LinuxInputHelper.h"
 
+#define ASIO_ENABLE_SSL
 #include <asio.hpp>
+#include <asio/ssl.hpp>
 #include <openssl/ssl.h>
+#include <openssl/err.h>
 
 #ifdef _WIN32
 // Windows-specific 
@@ -34,6 +37,11 @@ int main(int argc, char** argv) {
         LocalTether::Utils::Logger::GetInstance().Log("Input helper mode starting", LocalTether::Utils::LogLevel::Info);
         return LocalTether::Input::runInputHelperMode(argc, argv); 
     }
+    if (setenv("OPENSSL_CONF", "/dev/null", 1) != 0) {
+        LT::Utils::Logger::GetInstance().Warning("Failed to set OPENSSL_CONF environment variable to /dev/null.");
+    } else {
+        LT::Utils::Logger::GetInstance().Debug("Set OPENSSL_CONF to /dev/null to prevent loading system OpenSSL config.");
+    }
     #endif
 
     LT::Core::SDLApp app("LocalTether");
@@ -42,7 +50,18 @@ int main(int argc, char** argv) {
     }
     
     asio::io_context io_context;
-    SSL_library_init();
+    if (OPENSSL_init_ssl(OPENSSL_INIT_LOAD_SSL_STRINGS | OPENSSL_INIT_LOAD_CRYPTO_STRINGS, NULL) == 0) {
+        LT::Utils::Logger::GetInstance().Critical("Failed to initialize OpenSSL library.");
+        unsigned long err_code;
+        char err_buf[256];
+        while ((err_code = ERR_get_error()) != 0) {
+            ERR_error_string_n(err_code, err_buf, sizeof(err_buf));
+            LT::Utils::Logger::GetInstance().Error("OpenSSL Init Error: " + std::string(err_buf));
+        }
+        return -1; 
+    } else {
+        LT::Utils::Logger::GetInstance().Info("OpenSSL library initialized successfully.");
+    }
 
 #ifndef _WIN32
     LT::Utils::Logger::GetInstance().Info("PolKit ready");
@@ -84,6 +103,9 @@ int main(int argc, char** argv) {
                 break;
             case LT::UI::AppMode::ConnectedAsClient:
                 LT::UI::Flow::ShowClientDashboard();
+                break;
+            case LT::UI::AppMode::GeneratingServerAssets:
+                LT::UI::Flow::ShowGeneratingServerAssetsPanel();
                 break;
         }
     });

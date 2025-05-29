@@ -159,6 +159,7 @@ namespace LocalTether::UI {
             ImGui::DockBuilderDockWindow("Welcome", dock_main_id);
             ImGui::DockBuilderDockWindow("Host Setup", dock_main_id);
             ImGui::DockBuilderDockWindow("Join Setup", dock_main_id);
+            ImGui::DockBuilderDockWindow("Generating Server Assets", dock_main_id);
 
             ImGui::DockBuilderDockWindow("Pause Key Combo Settings", dock_right_bottom_id);
 

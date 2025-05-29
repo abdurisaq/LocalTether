@@ -6,3 +6,7 @@ compile_commands.json
 core*
 ipAddress*
 application.log
+server.crt
+server.key
+dh.pem
+localtether_config.cfg

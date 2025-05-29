@@ -1,20 +1,22 @@
 #pragma once
 
 #include "Message.h"
+#include "utils/Logger.h"
+#include "input/InputManager.h"  
+#include <optional>
+#include <thread>  
+#include <atomic>  
+#define ASIO_ENABLE_SSL
 #include <asio.hpp>
-#include <memory>
-#include <string>
-#include <functional>
+#include <asio/ssl.hpp>
 #include <queue>
-#include <mutex>
-#include <atomic>
-#include <thread>
-#include "input/InputManager.h"
-#include "utils/KeycodeConverter.h"
-#include <SDL.h>
+#include <utils/KeycodeConverter.h>
+#include <vector> 
+#include <cstdint>
 
 namespace LocalTether::Network {
 
+ 
 enum class ClientState {
     Disconnected,
     Connecting,
@@ -22,102 +24,122 @@ enum class ClientState {
     Error
 };
 
+ 
+ 
+
+
 class Client {
 public:
-    using ConnectHandler = std::function<void()>;
-    using MessageHandler = std::function<void(const Message&)>;
-    using DisconnectHandler = std::function<void()>;
-    using ErrorHandler = std::function<void(const std::error_code&)>;
+    using ConnectHandler = std::function<void(bool success, const std::string& message, uint32_t assignedId)>;
+    using DisconnectHandler = std::function<void(const std::string& reason)>;
+    using MessageHandler = std::function<void(const Message& message)>;
+    using ErrorHandler = std::function<void(const std::error_code& ec)>;
 
     Client(asio::io_context& io_context);
     ~Client();
 
-    // Connection management
-    void connect(const std::string& host, uint16_t port, 
-                ClientRole role = ClientRole::Receiver,
-                const std::string& name = "User",
-                const std::string& password = "");
-    void disconnect();
-    
-    // Send messages
-    void sendInput(const std::vector<uint8_t>& inputData);
+    Client(const Client&) = delete;
+    Client& operator=(const Client&) = delete;
+
+    void connect(const std::string& host, uint16_t port,
+                 ClientRole role, const std::string& name,
+                 const std::string& password_param); 
+
+    void disconnect(const std::string& reason = "user disconnected");
+    void send(const Message& msg);
+
+    ClientState getState() const { return state_.load(); }
+    std::string getLastError() const { return lastError_; }
+    uint32_t getClientId() const { return clientId_; }
+    ClientRole getRole() const { return role_; }
+    uint16_t getHostScreenWidth() const { return hostScreenWidth_; }
+    uint16_t getHostScreenHeight() const { return hostScreenHeight_; }
+
+
+    void setConnectHandler(ConnectHandler handler) { connectHandler_ = std::move(handler); }
+    void setDisconnectHandler(DisconnectHandler handler) { disconnectHandler_ = std::move(handler); }
+    void setMessageHandler(MessageHandler handler) { messageHandler_ = std::move(handler); }
+    void setErrorHandler(ErrorHandler handler) { errorHandler_ = std::move(handler); }
+
+     
     void sendInput(const InputPayload& payload);
-    void sendChat(const std::string& text);
+    void sendChatMessage(const std::string& chatMessage);
     void sendCommand(const std::string& command);
     void requestFile(const std::string& filename);
-    
-    // Status information
-    ClientState getState() const { return state_; }
-    std::string getErrorMessage() const { return lastError_; }
-    std::string getConnectedHost() const { return currentHost_; }
-    uint16_t getConnectedPort() const { return currentPort_; }
-    ClientRole getRole() const { return role_; }
-    
-    // Set event handlers
-    void setConnectHandler(ConnectHandler handler);
-    void setMessageHandler(MessageHandler handler);
-    void setDisconnectHandler(DisconnectHandler handler);
-    void setErrorHandler(ErrorHandler handler);
+
+    LocalTether::Input::InputManager* getInputManager() const;
+
+
+private:
 
     void initializeLocalScreenDimensions();
+    void setState(ClientState newState, const std::optional<std::error_code>& ec = std::nullopt);
+    void doResolve();
+    void handleResolve(const std::error_code& ec, const asio::ip::tcp::resolver::results_type& endpoints);
+    void handleTcpConnect(const std::error_code& error, const asio::ip::tcp::endpoint& endpoint);
+    
+    void doSslHandshake();
+    void handleSslHandshake(const std::error_code& error);
 
-    LocalTether::Input::InputManager* getInputManager() {
-        return inputManager_.get();
-    }
-private:
-    void handleMessage(const Message& message);
+    void performApplicationHandshake();
+     
+     
 
     void doRead();
     void handleRead(const std::error_code& error, size_t bytes_transferred);
+    void handleMessage(const Message& message);  
 
     void doWrite();
     void handleWrite(const std::error_code& error, size_t bytes_transferred);
-    
-    void handleConnect(const std::error_code& error);
-    void performHandshake();
 
-    void setState(ClientState newState, const std::error_code& error = std::error_code());
+    void doClose(const std::string& reason, bool notifyDisconnectHandler);
 
-
-    std::unique_ptr<LocalTether::Input::InputManager> inputManager_;
-    std::thread inputThread_;
-    std::atomic<bool> loggingInput_{false};
-
-    void inputLoop(); 
+     
     void startInputLogging();
     void stopInputLogging();
-    
-    // Member variables
+    void inputLoop();
+
     asio::io_context& io_context_;
-    asio::ip::tcp::socket socket_;
+    asio::ip::tcp::resolver resolver_;
+    
+    std::optional<asio::ssl::context> ssl_context_opt_;
+    std::optional<asio::ssl::stream<asio::ip::tcp::socket>> socket_opt_;
 
     std::string currentHost_;
     uint16_t currentPort_{0};
     std::atomic<ClientState> state_{ClientState::Disconnected};
     std::string lastError_;
 
-    uint32_t clientId_{0};
+    uint32_t clientId_{0}; 
     ClientRole role_{ClientRole::Receiver};
     std::string clientName_{"User"};
     std::string password_;
     
-    std::array<char, 8192> readBuffer_;
+    std::vector<char> readBuffer_; 
+    Message currentReadMessage_;      
     std::vector<uint8_t> partialMessage_;
+
     std::queue<std::vector<uint8_t>> writeQueue_;
     std::mutex writeMutex_;
     std::atomic<bool> writing_{false};
 
     ConnectHandler connectHandler_;
-    MessageHandler messageHandler_;
     DisconnectHandler disconnectHandler_;
-    ErrorHandler errorHandler_;
+    MessageHandler messageHandler_;  
+    ErrorHandler errorHandler_; 
 
-    uint32_t hostScreenWidth_ = 0;
-    uint32_t hostScreenHeight_ = 0;
+     
+    std::unique_ptr<LocalTether::Input::InputManager> inputManager_;
+    std::thread inputThread_;
+    std::atomic<bool> loggingInput_{false};
+    uint16_t localScreenWidth_{0};   
+    uint16_t localScreenHeight_{0};  
+    uint16_t hostScreenWidth_{0};    
+    uint16_t hostScreenHeight_{0};   
 
 
-    uint32_t localScreenWidth_ = 0;
-    uint32_t localScreenHeight_ = 0;
+      
+
 };
 
-} 
+}  
