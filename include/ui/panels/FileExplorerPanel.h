@@ -28,6 +28,10 @@ namespace LocalTether::UI::Panels {
         FileExplorerPanel();
         
         void Show(bool* p_open = nullptr);
+
+        void HandleExternalFileDragOver(const ImVec2& mouse_pos_in_window);
+        void HandleExternalFileDrop(const std::string& dropped_file_path);
+        void ClearExternalDragState();
         
     private:
         std::string rootStoragePath_;
@@ -46,7 +50,13 @@ namespace LocalTether::UI::Panels {
 
         bool isRenameMode_ = false;
         std::string itemToRenamePath_;     
-        char renameBuffer_[256];         
+        char renameBuffer_[256];        
+        
+        bool is_external_drag_over_panel_ = false;
+        std::string external_drag_target_folder_display_name_;
+        ImVec2 last_panel_pos_ = ImVec2(0,0);      // Store panel position
+        ImVec2 last_panel_size_ = ImVec2(0,0);     // Store panel size
+        std::filesystem::path current_drop_target_dir_;
 
          
         void InitializeStorage(); 

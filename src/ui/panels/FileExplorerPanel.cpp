@@ -265,10 +265,94 @@ namespace LocalTether::UI::Panels {
         }
     }
 
+    void FileExplorerPanel::HandleExternalFileDragOver(const ImVec2& mouse_pos_in_window) {
+        if (last_panel_size_.x == 0 && last_panel_size_.y == 0) {  
+            is_external_drag_over_panel_ = false;
+            return;
+        }
+
+        ImRect panel_rect(last_panel_pos_, ImVec2(last_panel_pos_.x + last_panel_size_.x, last_panel_pos_.y + last_panel_size_.y));
+        if (panel_rect.Contains(mouse_pos_in_window)) {
+            is_external_drag_over_panel_ = true;
+            
+            current_drop_target_dir_ = rootStoragePath_;  
+            if (!selectedPath_.empty() && fs::exists(selectedPath_) && fs::is_directory(selectedPath_)) {
+                current_drop_target_dir_ = selectedPath_;
+            }
+            external_drag_target_folder_display_name_ = current_drop_target_dir_.filename().string();
+            if (current_drop_target_dir_ == rootStoragePath_) {
+                external_drag_target_folder_display_name_ = "Storage Root";
+            }
+
+        } else {
+            is_external_drag_over_panel_ = false;
+            external_drag_target_folder_display_name_.clear();
+        }
+    }
+
+    void FileExplorerPanel::HandleExternalFileDrop(const std::string& dropped_file_path_str) {
+        if (!is_external_drag_over_panel_ || current_drop_target_dir_.empty()) {
+            Utils::Logger::GetInstance().Warning("File dropped, but not over a valid target in File Explorer.");
+            ClearExternalDragState();
+            return;
+        }
+
+        fs::path source_file_path(dropped_file_path_str);
+        fs::path target_dir = current_drop_target_dir_;
+        fs::path destination_path = target_dir / source_file_path.filename();
+
+        try {
+            if (!fs::exists(source_file_path)) {
+                Utils::Logger::GetInstance().Error("Dropped file does not exist: " + source_file_path.string());
+                ClearExternalDragState();
+                return;
+            }
+            if (!fs::exists(target_dir) || !fs::is_directory(target_dir)) {
+                Utils::Logger::GetInstance().Error("Drop target directory is not valid: " + target_dir.string());
+                ClearExternalDragState();
+                return;
+            }
+
+            if (fs::exists(destination_path)) {
+                Utils::Logger::GetInstance().Warning("File '" + source_file_path.filename().string() + "' already exists in '" + target_dir.filename().string() + "'. Overwriting.");
+                 
+            }
+            
+             
+             
+            if (fs::is_regular_file(source_file_path)) {
+                fs::copy_file(source_file_path, destination_path, fs::copy_options::overwrite_existing);
+                Utils::Logger::GetInstance().Info("Copied '" + source_file_path.string() + "' to '" + destination_path.string() + "'");
+            } else if (fs::is_directory(source_file_path)) {
+                 
+                fs::copy(source_file_path, destination_path, fs::copy_options::overwrite_existing | fs::copy_options::recursive);
+                Utils::Logger::GetInstance().Info("Copied directory '" + source_file_path.string() + "' to '" + destination_path.string() + "'");
+            } else {
+                Utils::Logger::GetInstance().Warning("Dropped item is not a regular file or directory: " + source_file_path.string());
+            }
+
+            RefreshView();  
+        } catch (const fs::filesystem_error& e) {
+            Utils::Logger::GetInstance().Error("Error copying file: " + std::string(e.what()));
+        }
+        ClearExternalDragState();
+    }
+
+    void FileExplorerPanel::ClearExternalDragState() {
+        is_external_drag_over_panel_ = false;
+        external_drag_target_folder_display_name_.clear();
+        current_drop_target_dir_.clear();
+    }
 
     void FileExplorerPanel::Show(bool* p_open) {
+        if (p_open && !*p_open) {
+            ClearExternalDragState();  
+            return;
+        }
         ImGui::Begin("File Explorer (Server Storage)", p_open);
 
+        last_panel_pos_ = ImGui::GetWindowPos();
+    last_panel_size_ = ImGui::GetWindowSize();
          
          
         bool creationDisabled = isMoveMode_ || isRenameMode_;
@@ -380,6 +464,16 @@ namespace LocalTether::UI::Panels {
                 ImGui::CloseCurrentPopup();
             }
             ImGui::EndPopup();
+        }
+
+        if (is_external_drag_over_panel_ && !external_drag_target_folder_display_name_.empty()) {
+            ImGui::SetNextWindowPos(ImVec2(last_panel_pos_.x + 10, last_panel_pos_.y + last_panel_size_.y - 40));  
+            ImGui::SetNextWindowBgAlpha(0.75f);
+            ImGui::Begin("DragDropNotification", nullptr, 
+                        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | 
+                        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove);
+            ImGui::Text("Drop into: %s", external_drag_target_folder_display_name_.c_str());
+            ImGui::End();
         }
         ImGui::End();
     }

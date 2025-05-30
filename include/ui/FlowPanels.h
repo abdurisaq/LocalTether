@@ -3,6 +3,7 @@
 namespace LocalTether::UI {
     enum class AppMode;
     extern AppMode app_mode;
+    namespace Panels { class FileExplorerPanel; } 
 }
 
 namespace LocalTether::UI::Flow {
@@ -14,5 +15,6 @@ void ShowConnectingModal();
 void ShowHostDashboard(); 
 void ShowClientDashboard();
 void ShowGeneratingServerAssetsPanel();
+LocalTether::UI::Panels::FileExplorerPanel& GetFileExplorerPanelInstance();
 
 }

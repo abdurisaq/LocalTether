@@ -408,6 +408,11 @@ void ShowJoinSetupPanel() {
   
   LocalTether::UI::Panels::ControlsPanel controls;
 
+  LocalTether::UI::Panels::FileExplorerPanel& GetFileExplorerPanelInstance() {
+    return fileExplorer; // fileExplorer is defined around line 405
+}
+
+
 void ShowHostDashboard() {
     consolePanel.Show(&LocalTether::UI::show_console);  
     fileExplorer.Show(&LocalTether::UI::show_file_explorer);  

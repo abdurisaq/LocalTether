@@ -67,6 +67,8 @@ private:
     
 
     bool running = false;
+
+    bool os_drag_active_ = false; 
     
 
     std::function<void()> renderCallback;

@@ -4,7 +4,8 @@
 #include "ui/Icons.h"
 #include <iostream>
 #include <filesystem>  
-
+#include "ui/FlowPanels.h"
+#include "ui/panels/FileExplorerPanel.h"
 
 namespace LocalTether::Core {
 
@@ -51,6 +52,12 @@ bool SDLApp::Initialize() {
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
     SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
+
+    SDL_EventState(SDL_DROPFILE, SDL_ENABLE);
+    SDL_EventState(SDL_DROPBEGIN, SDL_ENABLE); 
+    SDL_EventState(SDL_DROPCOMPLETE, SDL_ENABLE);
+
+    os_drag_active_ = false;
 
     window = SDL_CreateWindow(title.c_str(),
                               SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
@@ -148,15 +155,28 @@ void SDLApp::Run() {
     }
 
     while (running) {
-        ProcessEvents();
-        StartFrame();
-        
+         
+        if (os_drag_active_) {
+            int mouse_x, mouse_y;
+            SDL_GetMouseState(&mouse_x, &mouse_y);
+            ImVec2 current_mouse_pos = ImVec2(static_cast<float>(mouse_x), static_cast<float>(mouse_y));
+             
+            auto& fep = LocalTether::UI::Flow::GetFileExplorerPanelInstance();
+            fep.HandleExternalFileDragOver(current_mouse_pos);
+        } else {
+             
+            auto& fep = LocalTether::UI::Flow::GetFileExplorerPanelInstance();
+            fep.ClearExternalDragState();
+        }
 
+        ProcessEvents();  
+        StartFrame();     
+        
         if (renderCallback) {
-            renderCallback();
+            renderCallback();  
         }
         
-        Render();
+        Render();  
     }
     
     Cleanup();
@@ -172,6 +192,41 @@ void SDLApp::ProcessEvents() {
             event.window.event == SDL_WINDOWEVENT_CLOSE && 
             event.window.windowID == SDL_GetWindowID(window))
             running = false;
+        
+        if (event.type == SDL_DROPBEGIN) {
+            Utils::Logger::GetInstance().Debug("Drag begin over window.");
+            os_drag_active_ = true;
+             
+             
+            int mouse_x, mouse_y;
+            SDL_GetMouseState(&mouse_x, &mouse_y);  
+            auto& fep = LocalTether::UI::Flow::GetFileExplorerPanelInstance();
+            fep.HandleExternalFileDragOver(ImVec2(static_cast<float>(mouse_x), static_cast<float>(mouse_y)));
+
+        } else if (event.type == SDL_DROPFILE) {
+            char* dropped_file_sdl = event.drop.file; 
+            std::string dropped_file_path_str = dropped_file_sdl;
+            
+             
+             
+             
+             
+
+            Utils::Logger::GetInstance().Info("File dropped: " + dropped_file_path_str);
+
+            auto& fep = LocalTether::UI::Flow::GetFileExplorerPanelInstance();
+            fep.HandleExternalFileDrop(dropped_file_path_str);  
+
+            SDL_free(dropped_file_sdl); 
+            os_drag_active_ = false;  
+            fep.ClearExternalDragState();  
+
+        } else if (event.type == SDL_DROPCOMPLETE) {
+            Utils::Logger::GetInstance().Debug("Drag complete over window (SDL_DROPCOMPLETE).");
+            os_drag_active_ = false;
+            auto& fep = LocalTether::UI::Flow::GetFileExplorerPanelInstance();
+            fep.ClearExternalDragState();
+        }
     }
 }
 
