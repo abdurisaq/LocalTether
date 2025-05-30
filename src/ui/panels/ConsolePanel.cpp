@@ -10,7 +10,7 @@ namespace LocalTether::UI::Panels {
     }
     
     void ConsolePanel::Show(bool* p_open) {
-        ImGui::Begin("Console", p_open);
+        ImGui::Begin("Console", nullptr);
         
         if (ImGui::Button("Clear")) {
             Clear();  

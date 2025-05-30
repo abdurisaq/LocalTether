@@ -462,7 +462,7 @@ namespace LocalTether::UI::Panels {
             ClearExternalDragState();  
             return;
         }
-        ImGui::Begin("File Explorer", p_open); 
+        ImGui::Begin("File Explorer", nullptr); 
 
         last_panel_pos_ = ImGui::GetWindowPos();
         last_panel_size_ = ImGui::GetWindowSize();

@@ -1,5 +1,12 @@
-#include "utils/ScanNetwork.h"
 
+
+#define ASIO_ENABLE_SSL
+#include <asio.hpp>
+#include <asio/ssl.hpp>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+
+#include "utils/ScanNetwork.h"
 
 std::filesystem::path findProjectRoot(const std::string& targetDirName, int maxDepth) {
     namespace fs = std::filesystem;
@@ -104,39 +111,142 @@ void runScript(const std::string &scriptPath) {
             std::cout << "Command did not terminate normally.\n";
         }
     } else {
-        // fork failed
+         
         perror("fork failed");
     }
 }
 #endif
 
 std::vector<std::string> scanForServer(std::atomic<bool> & running) {
+     
 #ifdef _WIN32
     std::string scriptPath = getScriptPath();
-    runScript(scriptPath);
+    if (!scriptPath.empty()) {
+         
+        runScript(scriptPath);
+    } else {
+        std::cerr << "ScanNetwork: Could not get Windows script path." << std::endl;
+    }
 #else
     std::string scriptPath = getScriptPath();
-    runScript(scriptPath);
+    if (!scriptPath.empty()) {
+         
+        runScript(scriptPath);
+    } else {
+        std::cerr << "ScanNetwork: Could not get Linux script path." << std::endl;
+    }
 #endif
 
-    char buffer[1024];
-    std::vector<std::string> foundIps;
-    std::string ipAddr = (findProjectRoot("LocalTether", 4) / "scripts" / "ipAddress.txt").string();
-
-    FILE* file = fopen(ipAddr.c_str(), "r");
-    if (file == NULL) {
-        printf("Failed to open file\n");
-        exit(1);
+    std::vector<std::string> foundIpsFromFile;
+    std::filesystem::path ipAddrFilePath;
+    try {
+         
+        std::filesystem::path rootDir = findProjectRoot("LocalTether", 4);
+        if (rootDir.empty()) {
+             std::cerr << "ScanNetwork: Project root 'LocalTether' not found. Cannot locate ipAddress.txt." << std::endl;
+             running = false;
+             return {};
+        }
+        ipAddrFilePath = rootDir / "scripts" / "ipAddress.txt";
+    } catch (const std::exception& e) {
+        std::cerr << "ScanNetwork: Error finding project root or ipAddress.txt path: " << e.what() << std::endl;
+        running = false;
+        return {};
     }
 
+     
+    FILE* file = fopen(ipAddrFilePath.string().c_str(), "r");
+    if (file == NULL) {
+        std::cerr << "ScanNetwork: Failed to open ipAddress.txt at " << ipAddrFilePath.string() << std::endl;
+        running = false;
+        return {};
+    }
+
+    char buffer[1024];
     while (fgets(buffer, sizeof(buffer), file)) {
-        buffer[strcspn(buffer, "\n")] = '\0';
-        foundIps.push_back(buffer);
+        buffer[strcspn(buffer, "\n")] = '\0';  
+        if (strlen(buffer) > 0) {  
+            foundIpsFromFile.push_back(buffer);
+        }
     }
     fclose(file);
 
-    running = false;
+    if (foundIpsFromFile.empty()) {
+        std::cout << "ScanNetwork: No IPs found by the script in " << ipAddrFilePath.string() << std::endl;
+    } else {
+         
+    }
 
-    return foundIps;
+     
+    std::vector<std::string> verifiedLocalTetherServers;
+    asio::io_context io_context;
+    uint16_t localTetherPort = 8080;  
+
+     
+
+    for (const std::string& ip_str : foundIpsFromFile) {
+        if (!running.load()) {
+            std::cout << "ScanNetwork: Scan aborted by flag." << std::endl;
+            break;
+        }
+
+         
+
+        try {
+            asio::ip::tcp::resolver resolver(io_context);
+            asio::ip::tcp::endpoint endpoint(asio::ip::make_address(ip_str), localTetherPort);
+
+            asio::ssl::context ssl_ctx(asio::ssl::context::tls_client);
+             
+             
+            ssl_ctx.set_verify_mode(asio::ssl::verify_none);
+
+            asio::ssl::stream<asio::ip::tcp::socket> ssl_socket(io_context, ssl_ctx);
+
+            std::error_code ec_connect;
+             
+             
+             
+            ssl_socket.lowest_layer().connect(endpoint, ec_connect);
+
+            if (ec_connect) {
+                 
+                io_context.restart();  
+                continue;
+            }
+
+             
+
+            std::error_code ec_handshake;
+            ssl_socket.handshake(asio::ssl::stream_base::client, ec_handshake);
+
+            if (!ec_handshake) {
+                std::cout << "ScanNetwork: LocalTether server confirmed at " << ip_str << " (SSL handshake OK)" << std::endl;
+                verifiedLocalTetherServers.push_back(ip_str);
+                
+                std::error_code ec_ssl_shutdown;
+                ssl_socket.shutdown(ec_ssl_shutdown);  
+            } else {
+                 
+            }
+            
+             
+            if (ssl_socket.lowest_layer().is_open()) {
+                std::error_code ec_close;
+                ssl_socket.lowest_layer().shutdown(asio::ip::tcp::socket::shutdown_both, ec_close);  
+                ssl_socket.lowest_layer().close(ec_close);
+            }
+
+        } catch (const std::system_error& se) {
+             
+        } catch (const std::exception& e) {
+             
+        }
+        io_context.restart();  
+    }
+
+    std::cout << "ScanNetwork: Verification complete. Found " << verifiedLocalTetherServers.size() << " active LocalTether server(s)." << std::endl;
+
+    running = false;  
+    return verifiedLocalTetherServers;
 }
-

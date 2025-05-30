@@ -116,7 +116,7 @@ void ControlsPanel::Show(bool* p_open) {
     if (!p_open || !*p_open) {
         return;
     }
-    ImGui::Begin("Session Controls", p_open);
+    ImGui::Begin("Session Controls", nullptr);
 
     if (LocalTether::UI::app_mode == LocalTether::UI::AppMode::ConnectedAsHost) {
         ShowHostControls();
