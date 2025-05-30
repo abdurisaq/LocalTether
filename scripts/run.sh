@@ -33,19 +33,19 @@ if [[ -f "$EXE_PATH" ]]; then
     echo "Running LocalTether..."
     chmod +x "$EXE_PATH"
     
-    # "$EXE_PATH"
+    "$EXE_PATH"
     
-    nohup "$EXE_PATH" > "$LOG_FILE" 2>&1 &
+    # nohup "$EXE_PATH" > "$LOG_FILE" 2>&1 &
     
-    BG_PID=$!
-    if ps -p $BG_PID > /dev/null; then
-        echo "LocalTether is running in the background with PID $BG_PID"
-        echo "Output is being logged to $LOG_FILE"
-        echo "PID: $BG_PID"
-    else
-        echo "Failed to start LocalTether."
-        exit 1
-    fi
+    # BG_PID=$!
+    # if ps -p $BG_PID > /dev/null; then
+    #     echo "LocalTether is running in the background with PID $BG_PID"
+    #     echo "Output is being logged to $LOG_FILE"
+    #     echo "PID: $BG_PID"
+    # else
+    #     echo "Failed to start LocalTether."
+    #     exit 1
+    # fi
 else
     echo "Executable not found at $EXE_PATH"
     exit 1

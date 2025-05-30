@@ -3,7 +3,7 @@
 #include <mutex>
 #include <memory>  
 
-// Forward declarations
+ 
 namespace LocalTether::Network {
     class Client;
     class Server;
@@ -39,6 +39,7 @@ namespace LocalTether::UI {
     LocalTether::Network::Server* getServerPtr();
 
     void initializeNetwork();
+    bool isNetworkInitialized() ;
     void cleanupNetwork();
 
 

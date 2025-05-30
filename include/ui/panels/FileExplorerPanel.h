@@ -4,34 +4,72 @@
 #include <vector>
 #include <filesystem>  
 #include <chrono>      
-#include <unordered_map>  
+#include <unordered_map> 
+#include <filesystem>
+
+#include "ui/UIState.h"
+
+#include <cereal/cereal.hpp>
+#include <cereal/types/vector.hpp>
+#include <cereal/types/string.hpp>
+#include <cereal/types/chrono.hpp>
+
+
+namespace LocalTether::Network {
+    class Message;
+    class Client;  
+    class Server;  
+     
+}
+
 
 namespace LocalTether::UI::Panels {
-    
+
+    std::filesystem::path get_executable_directory();
+    std::filesystem::path find_ancestor_directory(const std::filesystem::path& start_path, const std::string& target_dir_name, int max_depth);
+
 
     struct FileMetadata {
-        std::string name;                
-        std::string fullPath;            
-        std::string relativePath;        
+        std::string name;
+        std::string fullPath;
+        std::string relativePath;
         bool isDirectory;
-        uint64_t size;                   
+        uint64_t size;
         std::chrono::system_clock::time_point modifiedTime;
-         
-        std::vector<FileMetadata> children;  
+        std::vector<FileMetadata> children;
 
-         
         FileMetadata() : isDirectory(false), size(0) {}
+
+        template <class Archive>
+        void serialize(Archive & ar) {
+            ar(CEREAL_NVP(name),
+               CEREAL_NVP(fullPath),
+               CEREAL_NVP(relativePath),
+               CEREAL_NVP(isDirectory),
+               CEREAL_NVP(size),
+               CEREAL_NVP(modifiedTime),
+               CEREAL_NVP(children));
+        }
     };
+    
+
 
     class FileExplorerPanel {
     public:
         FileExplorerPanel();
         
         void Show(bool* p_open = nullptr);
+        const FileMetadata& getRootNode() const;
+        void SetRootNode(const FileMetadata& newRootNode);
 
         void HandleExternalFileDragOver(const ImVec2& mouse_pos_in_window);
         void HandleExternalFileDrop(const std::string& dropped_file_path);
         void ClearExternalDragState();
+
+        void RefreshView();
+
+        
+        void BroadcastFileSystemUpdate();
         
     private:
         std::string rootStoragePath_;
@@ -54,16 +92,13 @@ namespace LocalTether::UI::Panels {
         
         bool is_external_drag_over_panel_ = false;
         std::string external_drag_target_folder_display_name_;
-        ImVec2 last_panel_pos_ = ImVec2(0,0);      // Store panel position
-        ImVec2 last_panel_size_ = ImVec2(0,0);     // Store panel size
+        ImVec2 last_panel_pos_ = ImVec2(0,0);       
+        ImVec2 last_panel_size_ = ImVec2(0,0);      
         std::filesystem::path current_drop_target_dir_;
 
          
         void InitializeStorage(); 
         void ScanDirectoryRecursive(const std::filesystem::path& dirPath, FileMetadata& parentNode);
-        void RefreshView();
-
-         
         void DrawFileSystemNode(FileMetadata& node, const std::string& current_node_path_prefix);
         
          
@@ -79,5 +114,7 @@ namespace LocalTether::UI::Panels {
         void HandleInitiateRename();
         void HandleConfirmRename();
         void HandleCancelRename();
+
+        
     };
 }

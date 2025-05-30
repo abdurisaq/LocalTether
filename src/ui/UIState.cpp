@@ -61,8 +61,12 @@ namespace LocalTether::UI {
             network_initialized = true;
         }
     }
+    bool isNetworkInitialized() {
+        return network_initialized;
+    }
     
     Network::Client& getClient() {
+        
         if (!network_initialized) {
             initializeNetwork();
         }
@@ -75,6 +79,7 @@ namespace LocalTether::UI {
     
      
     LocalTether::Network::Server* getServerPtr() {
+        
         return server_instance.get();
     }
 

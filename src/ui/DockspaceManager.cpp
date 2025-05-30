@@ -38,81 +38,7 @@ namespace LocalTether::UI {
         ImGui::PopStyleVar(3); 
 
          
-        if (ImGui::BeginMenuBar())
-        {
-            if (ImGui::BeginMenu("File"))
-            {
-                if (ImGui::MenuItem("New", "Ctrl+N")) 
-                {
-                    Utils::Logger::GetInstance().Info("New file created");
-                }
-                
-                if (ImGui::MenuItem("Open", "Ctrl+O")) 
-                {
-                    Utils::Logger::GetInstance().Info("Open file dialog requested");
-                }
-                
-                if (ImGui::MenuItem("Save", "Ctrl+S")) 
-                {
-                    Utils::Logger::GetInstance().Info("Save requested");
-                }
-                
-                ImGui::Separator();
-                
-                if (ImGui::MenuItem("Exit", "Alt+F4")) 
-                {
-                    LocalTether::Core::SDLApp::GetInstance().Quit();
-                    if (p_open) *p_open = false;
-                }
-                
-                ImGui::EndMenu();
-            }
-            
-            if (ImGui::BeginMenu("Edit"))
-            {
-                if (ImGui::MenuItem("Undo", "Ctrl+Z")) {}
-                if (ImGui::MenuItem("Redo", "Ctrl+Y")) {}
-                ImGui::Separator();
-                if (ImGui::MenuItem("Cut", "Ctrl+X")) {}
-                if (ImGui::MenuItem("Copy", "Ctrl+C")) {}
-                if (ImGui::MenuItem("Paste", "Ctrl+V")) {}
-                ImGui::EndMenu();
-            }
-            
-            if (ImGui::BeginMenu("View"))
-            {
-                ImGui::MenuItem("File Explorer", NULL, &LocalTether::UI::show_file_explorer);
-                ImGui::MenuItem("Example Panel", NULL, &LocalTether::UI::show_example_panel);
-                ImGui::MenuItem("Network Settings", NULL, &LocalTether::UI::show_network_settings);
-                ImGui::MenuItem("Console", NULL, &LocalTether::UI::show_console);
-                ImGui::MenuItem("Controls", NULL, &LocalTether::UI::show_controls_panel);
-                ImGui::EndMenu();
-            }
-            
-            if (ImGui::BeginMenu("Tools"))
-            {
-                if (ImGui::MenuItem("Settings")) 
-                {
-                    Utils::Logger::GetInstance().Info("Opening settings");
-                }
-                ImGui::EndMenu();
-            }
-            
-            if (ImGui::BeginMenu("Help"))
-            {
-                if (ImGui::MenuItem("Documentation")) 
-                {
-                    Utils::Logger::GetInstance().Info("Opening documentation");
-                }
-                if (ImGui::MenuItem("About")) 
-                {
-                    Utils::Logger::GetInstance().Info("Opening about dialog");
-                }
-                ImGui::EndMenu();
-            }
-            
-            ImGui::EndMenuBar();
-        }
+        
     
         float menu_bar_height = ImGui::GetFrameHeight(); 
         ImGui::SetCursorPos(ImVec2(0, menu_bar_height));
@@ -153,15 +79,14 @@ namespace LocalTether::UI {
 
             ImGuiID dock_right_bottom_id = ImGui::DockBuilderSplitNode(dock_right_id, ImGuiDir_Down, 0.4f, nullptr, &dock_right_id);
 
-            ImGui::DockBuilderDockWindow("File Explorer (Server Storage)", dock_main_id);
-            ImGui::DockBuilderDockWindow("Network Settings", dock_left_id);
+            ImGui::DockBuilderDockWindow("File Explorer", dock_main_id);
             ImGui::DockBuilderDockWindow("Example Panel", dock_main_id);
             ImGui::DockBuilderDockWindow("Console", dock_bottom_id);
             ImGui::DockBuilderDockWindow("Properties", dock_right_id);
-            ImGui::DockBuilderDockWindow("Welcome", dock_main_id);
-            ImGui::DockBuilderDockWindow("Host Setup", dock_main_id);
-            ImGui::DockBuilderDockWindow("Join Setup", dock_main_id);
-            ImGui::DockBuilderDockWindow("Generating Server Assets", dock_main_id);
+            ImGui::DockBuilderDockWindow("Welcome to LocalTether", dock_main_id);
+            ImGui::DockBuilderDockWindow("Host New Session", dock_main_id);
+            ImGui::DockBuilderDockWindow("Join Existing Session", dock_main_id);
+            ImGui::DockBuilderDockWindow("Initializing Server", dock_main_id);
 
             ImGui::DockBuilderDockWindow("Session Controls", dock_right_bottom_id);
 

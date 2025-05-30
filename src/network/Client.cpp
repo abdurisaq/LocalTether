@@ -2,6 +2,8 @@
 #include "utils/Logger.h"
 #include "utils/Serialization.h"  
 #include "input/InputManager.h"   
+#include "ui/UIState.h"
+#include <fstream>  
 #include <SDL.h>
 #ifdef _WIN32
 #include <winsock2.h>  
@@ -9,6 +11,7 @@
 #include <arpa/inet.h>  
 #endif
 
+namespace fs = std::filesystem;
 
 namespace LocalTether::Network {
 
@@ -95,6 +98,87 @@ void Client::initializeLocalScreenDimensions() {
 Client::~Client() {
     LocalTether::Utils::Logger::GetInstance().Debug("Client destructor called.");
     disconnect("client destroyed");
+}
+
+
+
+void Client::uploadFile(const std::string& localFilePath, const std::string& serverRelativePath, const std::string& fileNameOnServer) {
+    if (state_.load() != ClientState::Connected) {
+        Utils::Logger::GetInstance().Warning("Client::uploadFile - Not connected to server.");
+        return;
+    }
+
+    std::ifstream file(localFilePath, std::ios::binary | std::ios::ate);
+    if (!file.is_open()) {
+        Utils::Logger::GetInstance().Error("Client::uploadFile - Failed to open local file: " + localFilePath);
+        return;
+    }
+
+    std::streamsize size = file.tellg();
+    file.seekg(0, std::ios::beg);
+
+    std::vector<char> buffer(size);
+    if (!file.read(buffer.data(), size)) {
+        Utils::Logger::GetInstance().Error("Client::uploadFile - Failed to read local file: " + localFilePath);
+        return;
+    }
+    file.close();
+
+    Utils::Logger::GetInstance().Info("Client::uploadFile - Uploading '" + localFilePath + "' as '" + fileNameOnServer + "' to server relative path: '" + serverRelativePath + "'");
+    auto msg = Message::createFileUpload(serverRelativePath, fileNameOnServer, buffer, clientId_);
+    send(msg);
+}
+
+void Client::requestFile(const std::string& filename) {  
+    if (state_.load() != ClientState::Connected) return;
+    Utils::Logger::GetInstance().Info("Client requesting file: " + filename);
+    auto msg = Message::createFileRequest(filename, clientId_);
+    send(msg);
+}
+
+void Client::handleFileResponse(const Message& msg) {
+     
+    const std::string relativePath = msg.getRelativePathFromFileResponse();  
+    const std::vector<char> fileContent = msg.getFileContentFromUploadOrResponse();  
+ 
+    Utils::Logger::GetInstance().Info("Client received file: " + relativePath + ", size: " + std::to_string(fileContent.size()) + " bytes.");
+
+     
+    fs::path exe_dir = LocalTether::UI::Panels::get_executable_directory(); 
+    fs::path project_root_path = LocalTether::UI::Panels::find_ancestor_directory(exe_dir, "LocalTether", 4);
+    fs::path clientCacheRoot = (project_root_path.empty() ? exe_dir : project_root_path) / "client_file_cache";
+    
+    fs::path destinationPath = clientCacheRoot / relativePath;
+
+    try {
+        if (!fs::exists(destinationPath.parent_path())) {
+            fs::create_directories(destinationPath.parent_path());
+            Utils::Logger::GetInstance().Info("Created directory: " + destinationPath.parent_path().string());
+        }
+
+        std::ofstream outFile(destinationPath, std::ios::binary);
+        if (!outFile.is_open()) {
+            Utils::Logger::GetInstance().Error("Client::handleFileResponse - Failed to open/create local cache file: " + destinationPath.string());
+            return;
+        }
+        outFile.write(fileContent.data(), fileContent.size());
+        outFile.close();
+        Utils::Logger::GetInstance().Info("Client saved received file to: " + destinationPath.string());
+
+         
+         
+         
+
+    } catch (const fs::filesystem_error& e) {
+        Utils::Logger::GetInstance().Error("Client::handleFileResponse - Filesystem error saving file " + destinationPath.string() + ": " + e.what());
+    }
+}
+
+void Client::handleFileError(const Message& msg) {
+    std::string errorMessage = msg.getErrorMessageFromFileError();
+    std::string relatedPath = msg.getRelatedPathFromFileError();
+    Utils::Logger::GetInstance().Error("Client received file error for path '" + relatedPath + "': " + errorMessage);
+     
 }
 
 void Client::setState(ClientState newState, const std::optional<std::error_code>& ec) {
@@ -673,6 +757,25 @@ void Client::handleMessage(const Message& message) {
         }
         
     }
+    if(message.getType() == MessageType::FileSystemUpdate){
+        try {
+            UI::Panels::FileMetadata receivedRootNode = currentReadMessage_.getFileSystemMetadataPayload();
+            auto& fep = LocalTether::UI::Flow::GetFileExplorerPanelInstance(); 
+            fep.SetRootNode(receivedRootNode);
+        } catch (const std::exception& e) {
+            Utils::Logger::GetInstance().Error("Failed to process FileSystemUpdate: " + std::string(e.what()));
+        }
+
+    }
+    if (message.getType() == MessageType::FileResponse) {
+        handleFileResponse(message);
+        return;
+    }
+    if (message.getType() == MessageType::FileError) {
+        handleFileError(message);
+        return;
+    }
+
      
     if (messageHandler_) {
         messageHandler_(message);
@@ -785,12 +888,6 @@ void Client::sendChatMessage(const std::string& chatMessage) {
 void Client::sendCommand(const std::string& command) {
     if (state_.load() != ClientState::Connected) return;
     auto msg = Message::createCommand(command, clientId_);
-    send(msg);
-}
-
-void Client::requestFile(const std::string& filename) {
-    if (state_.load() != ClientState::Connected) return;
-    auto msg = Message::createFileRequest(filename, clientId_);
     send(msg);
 }
 

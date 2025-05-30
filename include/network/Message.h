@@ -2,28 +2,32 @@
 #include <vector>
 #include <string>
 #include <cstdint>
+#include "ui/panels/FileExplorerPanel.h"
+
 
 #include <cereal/cereal.hpp>  
 #include <cereal/types/vector.hpp>  
 #include <cereal/types/string.hpp>
-
+ 
 namespace LocalTether::Network {
 
 enum class MessageType : uint8_t {
-    Unknown = 0,
-    Handshake,
-    Input,
-    ChatMessage,
-    Command,
-    FileRequest,  
-    FileData,     
-    FileAck,      
-    Heartbeat,
-    Error,        
-    ClientListUpdate,  
-    HostInfoUpdate     
-     
-};
+        Invalid = 0,
+        Handshake,
+        HandshakeResponse,
+        Input,
+        ChatMessage,
+        Command,
+        KeepAlive,
+        Disconnect,
+        FileSystemUpdate,
+        FileRequest,
+        FileUpload,       
+        FileData,        // New: For sending actual file content chunks (or whole file)
+        FileResponse,    // New: Server sends file content to client
+        FileError,
+        Unknown
+    };
 
 enum class ClientRole : unsigned char {
     Broadcaster,    
@@ -151,15 +155,28 @@ public:
     std::string getTextPayload() const;
     InputPayload getInputPayload() const;  
     HandshakePayload getHandshakePayload() const;  
+    
+    LocalTether::UI::Panels::FileMetadata getFileSystemMetadataPayload() const;
 
-     
+       
     static Message createHandshake(const HandshakePayload& payload, uint32_t clientId);
     static Message createInput(const InputPayload& payload, uint32_t clientId);
     static Message createChat(const std::string& message, uint32_t clientId);
     static Message createCommand(const std::string& command, uint32_t clientId);
     static Message createFileRequest(const std::string& filename, uint32_t clientId);  
-    static Message createHeartbeat(uint32_t clientId);
+    static Message createFileUpload(const std::string& serverRelativePath, const std::string& fileNameOnServer, const std::vector<char>& fileContent, uint32_t senderId) ;
+    static Message createFileResponse(const std::string& relativePath, const std::vector<char>& fileContent, uint32_t senderId);
+    static Message createFileError(const std::string& errorMessage, const std::string& relatedPath, uint32_t senderId);
+    
+    std::string getServerRelativePathFromUpload() const;
+    std::string getFileNameFromUpload() const ;
+    std::string getErrorMessageFromFileError() const ;
+    std::string getRelatedPathFromFileError() const ;
+    std::vector<char> getFileContentFromUploadOrResponse() const;
 
+    std::string getRelativePathFromFileResponse() const;
+
+    static Message createFileSystemUpdate(const LocalTether::UI::Panels::FileMetadata& rootNode, uint32_t senderClientId);
      
     static std::string messageTypeToString(MessageType type);
 

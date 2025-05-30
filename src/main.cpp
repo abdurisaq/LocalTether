@@ -4,7 +4,6 @@
 #include "ui/FlowPanels.h"  
 #include "ui/panels/ConsolePanel.h"
 #include "ui/panels/FileExplorerPanel.h"
-#include "ui/panels/NetworkSettingsPanel.h"
 #include "ui/panels/ControlsPanel.h"
 #include "utils/Logger.h"
 #include "input/InputManager.h"
@@ -49,7 +48,7 @@ int main(int argc, char** argv) {
         return -1;
     }
     
-    asio::io_context io_context;
+    
     if (OPENSSL_init_ssl(OPENSSL_INIT_LOAD_SSL_STRINGS | OPENSSL_INIT_LOAD_CRYPTO_STRINGS, NULL) == 0) {
         LT::Utils::Logger::GetInstance().Critical("Failed to initialize OpenSSL library.");
         unsigned long err_code;
@@ -62,20 +61,18 @@ int main(int argc, char** argv) {
     } else {
         LT::Utils::Logger::GetInstance().Info("OpenSSL library initialized successfully.");
     }
+    asio::io_context io_context;
 
 #ifndef _WIN32
     LT::Utils::Logger::GetInstance().Info("PolKit ready");
 #endif
-
+    LT::UI::initializeNetwork();
     
-    LT::UI::DockspaceManager dockspaceManager;
-    LT::UI::Panels::ConsolePanel consolePanel;
-    LT::UI::Panels::FileExplorerPanel fileExplorerPanel;
-    LT::UI::Panels::NetworkSettingsPanel networkSettingsPanel;
-    LT::UI::Panels::ControlsPanel controlsPanel;
     
     LocalTether::Utils::Logger::GetInstance().Info("--- Application Main Started ---");
 
+    LT::UI::DockspaceManager dockspaceManager;
+    
     LT::UI::app_mode = LT::UI::AppMode::None;
     app.SetRenderCallback([&]() {
         
@@ -111,6 +108,10 @@ int main(int argc, char** argv) {
 
     
     app.Run();
+
+    LT::UI::cleanupNetwork();
+
+    LT::Utils::Logger::GetInstance().Info("--- Application Main Exited ---");
 
     return 0;
 }

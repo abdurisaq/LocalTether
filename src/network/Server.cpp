@@ -6,6 +6,10 @@
 #include <chrono>
 #include "utils/SslCertificateGenerator.h"
 #include <iostream>
+#include "ui/FlowPanels.h"
+#include "ui/panels/FileExplorerPanel.h"
+
+namespace fs = std::filesystem;
 
 namespace LocalTether::Network {
 
@@ -18,6 +22,25 @@ Server::Server(asio::io_context& io_context, uint16_t port)
       ssl_context_(asio::ssl::context::tls_server) {
 
     LocalTether::Utils::Logger::GetInstance().Info("Server created on port: " + std::to_string(port_));
+
+
+
+    fs::path exe_dir = LocalTether::UI::Panels::get_executable_directory();
+    fs::path project_root_path = LocalTether::UI::Panels::find_ancestor_directory(exe_dir, "LocalTether", 4);
+    fs::path base_path = project_root_path.empty() ? exe_dir : project_root_path;
+    serverRootStoragePath_ = (base_path / "server_storage").string();  
+    
+    if (!fs::exists(serverRootStoragePath_)) {
+        try {
+            fs::create_directories(serverRootStoragePath_);
+            Utils::Logger::GetInstance().Info("Server created storage directory: " + serverRootStoragePath_);
+        } catch (const fs::filesystem_error& e) {
+            Utils::Logger::GetInstance().Error("Server failed to create storage directory " + serverRootStoragePath_ + ": " + e.what());
+             
+        }
+    } else {
+        Utils::Logger::GetInstance().Info("Server using existing storage directory: " + serverRootStoragePath_);
+    }
 
      
     asio::error_code ec_acceptor;
@@ -86,6 +109,18 @@ Server::Server(asio::io_context& io_context, uint16_t port)
          
     }
 }
+
+
+void Server::setFileExplorerPanel(LocalTether::UI::Panels::FileExplorerPanel* fePanel) {
+    fileExplorerPanel_ = fePanel;
+    if (fileExplorerPanel_) {
+         
+         
+         
+        Utils::Logger::GetInstance().Info("Server linked with FileExplorerPanel.");
+    }
+}
+
 
 Server::~Server() {
     if (acceptor_.is_open()) {
@@ -170,6 +205,35 @@ void Server::doAccept() {
     acceptor_.async_accept(
         [this](std::error_code ec, asio::ip::tcp::socket socket) {
             if (!ec) {
+                asio::ip::tcp::endpoint remote_endpoint = socket.remote_endpoint(ec);
+                if (ec) {
+                    LocalTether::Utils::Logger::GetInstance().Error("Failed to get remote endpoint: " + ec.message());
+                    // Continue to accept next connection
+                    if (state_ == ServerState::Running || state_ == ServerState::Starting) {
+                        doAccept();
+                    }
+                    return;
+                }
+                std::string remote_ip_str = remote_endpoint.address().to_string();
+
+                if (this->localNetworkOnly) {
+                    // Allow loopback for the internal host client
+                    if (remote_ip_str != "127.0.0.1" && remote_ip_str.rfind("192.168.", 0) != 0 && remote_ip_str.rfind("172.16.", 0) != 0) {
+                        LocalTether::Utils::Logger::GetInstance().Warning(
+                            "Connection refused from " + remote_ip_str +
+                            " due to localNetworkOnly policy (expected 127.0.0.1 or 192.168.1.x).");
+                        asio::error_code close_ec;
+                        socket.shutdown(asio::ip::tcp::socket::shutdown_both, close_ec);
+                        socket.close(close_ec);
+                        // Continue to accept next connection
+                        if (state_ == ServerState::Running || state_ == ServerState::Starting) {
+                            doAccept();
+                        }
+                        return;
+                    }
+                }
+
+
                 uint32_t newClientId = 0;  
                 {
                     std::lock_guard<std::mutex> lock(sessions_mutex_);
@@ -233,6 +297,14 @@ void Server::handleMessage(std::shared_ptr<Session> session, const Message& mess
             processHandshake(session, message);
             break;
         }
+        case MessageType::FileUpload: {
+            processFileUpload(session, message);
+            break;
+        }
+        case MessageType::FileRequest: {
+            processFileRequest(session, message);
+            break;
+        }
         case MessageType::Input: {
             try {
                 auto payload = message.getInputPayload();  
@@ -287,10 +359,6 @@ void Server::handleMessage(std::shared_ptr<Session> session, const Message& mess
             broadcast(message);
             break;
         }
-        case MessageType::FileRequest: {
-            processFileRequest(session, message);
-            break;
-        }
         case MessageType::Command: {
             if (session->getRole() == ClientRole::Host) {
                 processCommand(session, message);
@@ -299,15 +367,141 @@ void Server::handleMessage(std::shared_ptr<Session> session, const Message& mess
             }
             break;
         }
-        case MessageType::Heartbeat: {
-            session->send(message);  
-            break;
-        }
         default:
             LocalTether::Utils::Logger::GetInstance().Warning(
                 "Received unknown/unhandled message type " + Message::messageTypeToString(message.getType()) + 
                 " from: " + session->getClientAddress());
     }
+}
+
+
+void Server::processFileUpload(std::shared_ptr<Session> session, const Message& message) {
+    if (!session) return;
+
+    std::string serverRelativePath = message.getServerRelativePathFromUpload();
+    std::string fileNameOnServer = message.getFileNameFromUpload();
+    const std::vector<char>& fileContent = message.getFileContentFromUploadOrResponse();
+
+    if (serverRelativePath.empty() || fileNameOnServer.empty()) {
+        Utils::Logger::GetInstance().Error("Server: Invalid file upload request from client " + std::to_string(session->getClientId()) + " (missing paths).");
+         
+        return;
+    }
+
+    Utils::Logger::GetInstance().Info("Server: Client " + std::to_string(session->getClientId()) + " uploading file '" + fileNameOnServer +
+                                      "' to relative path '" + serverRelativePath + "'. Size: " + std::to_string(fileContent.size()) + " bytes.");
+
+    fs::path targetDir = fs::path(serverRootStoragePath_) / serverRelativePath;
+    fs::path destinationPath = targetDir / fileNameOnServer;
+
+     
+    fs::path canonicalTargetDir = fs::weakly_canonical(targetDir);
+    fs::path canonicalRoot = fs::weakly_canonical(fs::path(serverRootStoragePath_));
+
+    if (canonicalTargetDir.string().rfind(canonicalRoot.string(), 0) != 0) {
+        Utils::Logger::GetInstance().Error("Server: File upload security violation. Attempt to write outside root storage. Client: " +
+                                           std::to_string(session->getClientId()) + ", Path: " + destinationPath.string());
+         
+        return;
+    }
+
+    try {
+        if (!fs::exists(targetDir)) {
+            if (fs::create_directories(targetDir)) {
+                Utils::Logger::GetInstance().Info("Server: Created directory for upload: " + targetDir.string());
+            } else {
+                Utils::Logger::GetInstance().Error("Server: Failed to create directory for upload: " + targetDir.string());
+                 
+                return;
+            }
+        }
+
+        std::ofstream outFile(destinationPath, std::ios::binary | std::ios::trunc);  
+        if (!outFile.is_open()) {
+            Utils::Logger::GetInstance().Error("Server: Failed to open/create file for writing: " + destinationPath.string());
+             
+            return;
+        }
+
+        outFile.write(fileContent.data(), fileContent.size());
+        outFile.close();
+
+        Utils::Logger::GetInstance().Info("Server: Successfully saved uploaded file: " + destinationPath.string());
+
+         
+         
+         
+        if (fileExplorerPanel_) {  
+             Utils::Logger::GetInstance().Info("Server triggering FileExplorerPanel refresh and broadcast.");
+             fileExplorerPanel_->RefreshView();  
+             fileExplorerPanel_->BroadcastFileSystemUpdate();
+        } else {
+             
+             
+             
+             
+             
+            try {
+                auto& panel = LocalTether::UI::Flow::GetFileExplorerPanelInstance();
+                Utils::Logger::GetInstance().Info("Server triggering FileExplorerPanel refresh and broadcast via GetInstance.");
+                panel.RefreshView();
+                panel.BroadcastFileSystemUpdate();
+            } catch (const std::exception& e) {
+                Utils::Logger::GetInstance().Error("Server: Could not get FileExplorerPanel instance to broadcast update: " + std::string(e.what()));
+            }
+        }
+
+    } catch (const fs::filesystem_error& e) {
+        Utils::Logger::GetInstance().Error("Server: Filesystem error during file upload " + destinationPath.string() + ": " + std::string(e.what()));
+         
+    }
+}
+
+
+void Server::processFileRequest(std::shared_ptr<Session> session, const Message& message) {
+    if (!session) return;
+     
+    std::string requestedFileRelativePath = message.getTextPayload();   
+    Utils::Logger::GetInstance().Info("Server: Client " + session->getClientName() + " (ID: " + std::to_string(session->getClientId()) + 
+                                      ") requested file: " + requestedFileRelativePath);
+     
+    fs::path fullPathToServerFile = fs::path(serverRootStoragePath_) / requestedFileRelativePath;
+
+     
+    fs::path canonicalRequestedPath = fs::weakly_canonical(fullPathToServerFile);
+    fs::path canonicalRoot = fs::weakly_canonical(fs::path(serverRootStoragePath_));
+
+    if (canonicalRequestedPath.string().rfind(canonicalRoot.string(), 0) != 0 || !fs::exists(canonicalRequestedPath) || !fs::is_regular_file(canonicalRequestedPath)) {
+        Utils::Logger::GetInstance().Warning("Server: File not found or invalid request for '" + requestedFileRelativePath + "' from client " + std::to_string(session->getClientId()));
+        Message errorMsg = Message::createFileError("File not found or access denied.", requestedFileRelativePath, 0);  
+        session->send(errorMsg);
+        return;
+    }
+
+    std::ifstream file(canonicalRequestedPath, std::ios::binary | std::ios::ate);
+    if (!file.is_open()) {
+        Utils::Logger::GetInstance().Error("Server: Could not open file '" + canonicalRequestedPath.string() + "' for client " + std::to_string(session->getClientId()));
+        Message errorMsg = Message::createFileError("Server error: Could not open file.", requestedFileRelativePath, 0);
+        session->send(errorMsg);
+        return;
+    }
+
+    std::streamsize size = file.tellg();
+    file.seekg(0, std::ios::beg);
+    std::vector<char> buffer(size);
+
+    if (!file.read(buffer.data(), size)) {
+        file.close();
+        Utils::Logger::GetInstance().Error("Server: Could not read file '" + canonicalRequestedPath.string() + "' for client " + std::to_string(session->getClientId()));
+        Message errorMsg = Message::createFileError("Server error: Could not read file.", requestedFileRelativePath, 0);
+        session->send(errorMsg);
+        return;
+    }
+    file.close();
+
+    Utils::Logger::GetInstance().Info("Server: Sending file '" + requestedFileRelativePath + "' (" + std::to_string(size) + " bytes) to client " + std::to_string(session->getClientId()));
+    Message responseMsg = Message::createFileResponse(requestedFileRelativePath, buffer, 0);  
+    session->send(responseMsg);
 }
 
 void Server::processLimitedCommand(std::shared_ptr<Session> session, const Message& message) {
@@ -410,6 +604,21 @@ void Server::processHandshake(std::shared_ptr<Session> session, const Message& m
                 ") application handshake complete. Role: " + session->getRoleString());
 
             notifyClientJoined(session);
+            if (session->getRole() != ClientRole::Host) {  
+                try {
+                    auto& fep = LocalTether::UI::Flow::GetFileExplorerPanelInstance();  
+                    const auto& rootNode = fep.getRootNode();  
+                    if (!rootNode.fullPath.empty()) {  
+                        Message fsUpdateMsg = Message::createFileSystemUpdate(rootNode, hostClientId_);  
+                        session->send(fsUpdateMsg);
+                        LocalTether::Utils::Logger::GetInstance().Info("Sent initial FileSystemUpdate to client ID: " + std::to_string(session->getClientId()));
+                    } else {
+                        LocalTether::Utils::Logger::GetInstance().Warning("Server's FileExplorerPanel rootNode is not initialized. Cannot send initial FS update.");
+                    }
+                } catch (const std::exception& e) {
+                    LocalTether::Utils::Logger::GetInstance().Error("Error preparing initial FileSystemUpdate: " + std::string(e.what()));
+                }
+            }
         } else {
             LocalTether::Utils::Logger::GetInstance().Warning(
                 "Authentication failed for: " + session->getClientAddress() + " with name " + handshakeData.clientName);
@@ -650,17 +859,6 @@ void Server::processCommand(std::shared_ptr<Session> session, const Message& mes
     }
 }
 
-void Server::processFileRequest(std::shared_ptr<Session> session, const Message& message) {
-    if (!session) return;
-     
-    std::string requestedFile = message.getTextPayload();  
-    LocalTether::Utils::Logger::GetInstance().Info("Client " + session->getClientName() + " requested file: " + requestedFile);
-     
-    auto response = Message::createCommand("file_request_unsupported: " + requestedFile, 0);
-    LocalTether::Utils::Logger::GetInstance().Warning("File request from " + session->getClientName() + 
-        " (ID: " + std::to_string(session->getClientId()) + ") is unsupported.");
-    session->send(response);
-}
 
 void Server::notifyClientJoined(std::shared_ptr<Session> session) {
     if (!session) return;

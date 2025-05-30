@@ -137,6 +137,9 @@ if(UNIX AND NOT APPLE)
     
 endif()
 
+# target_compile_options(LocalTether PRIVATE -fsanitize=address -g) # remove this later
+# target_link_libraries(LocalTether PRIVATE -fsanitize=address) #remove this later
+
 # No console on Windows
 if (WIN32)
     set_target_properties(LocalTether PROPERTIES WIN32_EXECUTABLE TRUE)

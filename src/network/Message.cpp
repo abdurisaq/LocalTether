@@ -16,6 +16,8 @@
 #include <cereal/types/string.hpp>
 #include <cereal/types/chrono.hpp>  
 
+#include "ui/panels/FileExplorerPanel.h" 
+
 namespace LocalTether::Network {
 
  
@@ -204,26 +206,163 @@ Message Message::createFileRequest(const std::string& filename, uint32_t clientI
     return Message(MessageType::FileRequest, clientId, filename);
 }
 
-Message Message::createHeartbeat(uint32_t clientId) {
-    return Message(MessageType::Heartbeat, clientId);  
+
+Message Message::createFileSystemUpdate(const LocalTether::UI::Panels::FileMetadata& rootNode, uint32_t senderClientId) {
+    std::ostringstream os(std::ios::binary);
+    {
+        cereal::BinaryOutputArchive archive(os);
+        archive(rootNode);
+    }
+    std::string serialized_str = os.str();
+    std::vector<uint8_t> body(serialized_str.begin(), serialized_str.end());
+    return Message(MessageType::FileSystemUpdate, senderClientId, body);
 }
 
-std::string Message::messageTypeToString(MessageType type) {
+LocalTether::UI::Panels::FileMetadata Message::getFileSystemMetadataPayload() const {
+    if (type_ != MessageType::FileSystemUpdate) {
+        throw std::runtime_error("Message is not of type FileSystemUpdate");
+    }
+    LocalTether::UI::Panels::FileMetadata rootNode;
+    std::string body_str(body_.begin(), body_.end());
+    std::istringstream is(body_str, std::ios::binary);
+    {
+        cereal::BinaryInputArchive archive(is);
+        archive(rootNode);
+    }
+    return rootNode;
+}
+
+Message Message::createFileUpload(const std::string& serverRelativePath, const std::string& fileNameOnServer, const std::vector<char>& fileContent, uint32_t senderId) {
+    std::vector<uint8_t> body;
+     
+    body.insert(body.end(), serverRelativePath.begin(), serverRelativePath.end());
+    body.push_back('\0');  
+     
+    body.insert(body.end(), fileNameOnServer.begin(), fileNameOnServer.end());
+    body.push_back('\0');  
+     
+    body.insert(body.end(), fileContent.begin(), fileContent.end());
+    return Message(MessageType::FileUpload, senderId, body);
+}
+Message Message::createFileResponse(const std::string& relativePath, const std::vector<char>& fileContent, uint32_t senderId) {
+    std::vector<uint8_t> body;
+     
+    body.insert(body.end(), relativePath.begin(), relativePath.end());
+    body.push_back('\0');  
+     
+    body.insert(body.end(), fileContent.begin(), fileContent.end());
+    return Message(MessageType::FileResponse, senderId, body);
+}
+Message Message::createFileError(const std::string& errorMessage, const std::string& relatedPath, uint32_t senderId) {
+    std::vector<uint8_t> body;
+     
+    body.insert(body.end(), errorMessage.begin(), errorMessage.end());
+    body.push_back('\0');  
+     
+    body.insert(body.end(), relatedPath.begin(), relatedPath.end());
+     
+     
+    return Message(MessageType::FileError, senderId, body);
+}
+
+std::string Message::getServerRelativePathFromUpload() const {
+    if (type_ != MessageType::FileUpload || body_.empty()) {
+        return "";
+    }
+    auto it_first_null = std::find(body_.begin(), body_.end(), '\0');
+    if (it_first_null == body_.end()) {
+        return "";  
+    }
+    return std::string(body_.begin(), it_first_null);
+}
+
+std::string Message::getFileNameFromUpload() const {
+    if (type_ != MessageType::FileUpload || body_.empty()) {
+        return "";
+    }
+    auto it_first_null = std::find(body_.begin(), body_.end(), '\0');
+    if (it_first_null == body_.end() || (it_first_null + 1) == body_.end()) {
+        return "";  
+    }
+    auto it_second_null = std::find(it_first_null + 1, body_.end(), '\0');
+     
+    return std::string(it_first_null + 1, it_second_null);
+}
+
+std::vector<char> Message::getFileContentFromUploadOrResponse() const {
+    if (body_.empty()) {
+        return {};
+    }
+    if (type_ == MessageType::FileUpload) {
+        auto it_first_null = std::find(body_.begin(), body_.end(), '\0');
+        if (it_first_null == body_.end() || (it_first_null + 1) == body_.end()) return {};  
+        auto it_second_null = std::find(it_first_null + 1, body_.end(), '\0');
+        if (it_second_null == body_.end() || (it_second_null + 1) == body_.end()) return {};  
+        return std::vector<char>(it_second_null + 1, body_.end());
+    } else if (type_ == MessageType::FileResponse) {
+        auto it_first_null = std::find(body_.begin(), body_.end(), '\0');
+        if (it_first_null == body_.end() || (it_first_null + 1) == body_.end()) return {};  
+        return std::vector<char>(it_first_null + 1, body_.end());
+    }
+    return {};
+}
+
+std::string Message::getRelativePathFromFileResponse() const {
+    if (type_ != MessageType::FileResponse || body_.empty()) {
+        return "";
+    }
+    auto it_first_null = std::find(body_.begin(), body_.end(), '\0');
+    if (it_first_null == body_.end()) {
+        return "";  
+    }
+    return std::string(body_.begin(), it_first_null);
+}
+
+std::string Message::getErrorMessageFromFileError() const {
+    if (type_ != MessageType::FileError || body_.empty()) {
+        return "";
+    }
+    auto it_first_null = std::find(body_.begin(), body_.end(), '\0');
+    if (it_first_null == body_.end()) {
+         
+         
+        return std::string(body_.begin(), body_.end());  
+    }
+    return std::string(body_.begin(), it_first_null);
+}
+std::string Message::getRelatedPathFromFileError() const {
+    if (type_ != MessageType::FileError || body_.empty()) {
+        return "";
+    }
+    auto it_first_null = std::find(body_.begin(), body_.end(), '\0');
+    if (it_first_null == body_.end() || (it_first_null + 1) == body_.end()) {
+        return "";  
+    }
+     
+    return std::string(it_first_null + 1, body_.end());
+}
+
+
+
+std::string Message::messageTypeToString(MessageType type){
     switch (type) {
-        case MessageType::Unknown: return "Unknown";
+        case MessageType::Invalid: return "Invalid";
         case MessageType::Handshake: return "Handshake";
+        case MessageType::HandshakeResponse: return "HandshakeResponse";
         case MessageType::Input: return "Input";
         case MessageType::ChatMessage: return "ChatMessage";
         case MessageType::Command: return "Command";
+        case MessageType::KeepAlive: return "KeepAlive";
+        case MessageType::Disconnect: return "Disconnect";
+        case MessageType::FileSystemUpdate: return "FileSystemUpdate";
         case MessageType::FileRequest: return "FileRequest";
+        case MessageType::FileUpload: return "FileUpload";
         case MessageType::FileData: return "FileData";
-        case MessageType::FileAck: return "FileAck";
-        case MessageType::Heartbeat: return "Heartbeat";
-        case MessageType::Error: return "Error";
-        case MessageType::ClientListUpdate: return "ClientListUpdate";
-        case MessageType::HostInfoUpdate: return "HostInfoUpdate";
-        default: return "UndefinedType (" + std::to_string(static_cast<int>(type)) + ")";
+        case MessageType::FileResponse: return "FileResponse";
+        case MessageType::FileError: return "FileError";
+        default: return "Unknown";
     }
 }
+
 
 }  

@@ -14,6 +14,11 @@
 #include <vector> 
 #include <cstdint>
 
+#include <cereal/archives/binary.hpp> 
+#include <sstream>
+#include "ui/FlowPanels.h" 
+#include "ui/panels/FileExplorerPanel.h"
+
 namespace LocalTether::Network {
 
  
@@ -70,6 +75,9 @@ public:
     LocalTether::Input::InputManager* getInputManager() const;
 
 
+    void uploadFile(const std::string& localFilePath, const std::string& serverRelativePath, const std::string& fileNameOnServer);
+    void handleFileResponse(const Message& msg);
+
 private:
 
     void initializeLocalScreenDimensions();
@@ -78,6 +86,8 @@ private:
     void handleResolve(const std::error_code& ec, const asio::ip::tcp::resolver::results_type& endpoints);
     void handleTcpConnect(const std::error_code& error, const asio::ip::tcp::endpoint& endpoint);
     
+    void handleFileError(const Message& msg);
+
     void doSslHandshake();
     void handleSslHandshake(const std::error_code& error);
 

@@ -11,6 +11,11 @@
 #include <algorithm> 
 #include <optional>
 #include "utils/KeycodeConverter.h"
+
+#include "ui/panels/FileExplorerPanel.h"  
+#include "ui/FlowPanels.h" 
+#include <fstream>
+#include <filesystem>
 #define ASIO_ENABLE_SSL
 #include <asio.hpp>
 #include <asio/ssl.hpp>
@@ -65,6 +70,8 @@ public:
     uint32_t hostClientId = 0; 
     uint32_t hostScreenWidth_ = 0;
     uint32_t hostScreenHeight_ = 0;
+
+     void setFileExplorerPanel(LocalTether::UI::Panels::FileExplorerPanel* fePanel);
     
 private:
     
@@ -101,6 +108,11 @@ private:
     std::string lastError_;
     ConnectionHandler connectionHandler_;
     ErrorHandler errorHandler_;
+
+    void processFileUpload(std::shared_ptr<Session> session, const Message& message);
+
+    std::string serverRootStoragePath_;  
+    LocalTether::UI::Panels::FileExplorerPanel* fileExplorerPanel_ = nullptr;
 
 };
 
