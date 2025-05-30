@@ -9,6 +9,8 @@ ROOT_DIR="$(realpath "$SCRIPT_DIR/..")"
 BUILD_DIR="$ROOT_DIR/build"
 VCPKG_DIR="$ROOT_DIR/vcpkg"
 EXTERNAL_DIR="$ROOT_DIR/external"
+ASSETS_DIR="$ROOT_DIR/assets" 
+FONTS_DIR="$ASSETS_DIR/fonts"
 IMGUI_DIR="$EXTERNAL_DIR/imgui"
 IMGUI_BACKENDS_DIR="$EXTERNAL_DIR/imgui_backends"
 
@@ -62,6 +64,52 @@ install_gui_deps() {
 
 install_build_essentials
 install_gui_deps
+
+mkdir -p "$FONTS_DIR"
+
+IBM_PLEX_MONO_TTF_URL="https://github.com/google/fonts/raw/refs/heads/main/ofl/ibmplexmono/IBMPlexMono-Regular.ttf"
+IBM_PLEX_MONO_TTF_PATH="$FONTS_DIR/IBMPlexMono-Regular.ttf"
+
+FONT_AWESOME_SOLID_TTF_URL="https://github.com/FortAwesome/Font-Awesome/raw/6.x/webfonts/fa-solid-900.ttf" # Using FA6 solid
+FONT_AWESOME_SOLID_TTF_PATH="$FONTS_DIR/fa-solid-900.ttf"
+
+
+if [[ ! -f "$IBM_PLEX_MONO_TTF_PATH" ]]; then
+    echo "Downloading IBMPlexMono-Regular.ttf..."
+    if command -v curl &> /dev/null; then
+        curl -L "$IBM_PLEX_MONO_TTF_URL" -o "$IBM_PLEX_MONO_TTF_PATH" --create-dirs
+    elif command -v wget &> /dev/null; then
+        wget "$IBM_PLEX_MONO_TTF_URL" -O "$IBM_PLEX_MONO_TTF_PATH"
+    else
+        echo "Error: curl or wget not found. Please install one to download fonts."
+    fi
+    if [[ ! -f "$IBM_PLEX_MONO_TTF_PATH" ]]; then
+        echo "Error: Failed to download IBMPlexMono-Regular.ttf."
+    else
+        echo "IBMPlexMono-Regular.ttf downloaded successfully."
+    fi
+else
+    echo "IBMPlexMono-Regular.ttf already exists."
+fi
+
+# Download Font Awesome Solid if it doesn't exist
+if [[ ! -f "$FONT_AWESOME_SOLID_TTF_PATH" ]]; then
+    echo "Downloading Font Awesome Solid ttf..."
+    if command -v curl &> /dev/null; then
+        curl -L "$FONT_AWESOME_SOLID_TTF_URL" -o "$FONT_AWESOME_SOLID_TTF_PATH" --create-dirs
+    elif command -v wget &> /dev/null; then
+        wget "$FONT_AWESOME_SOLID_TTF_URL" -O "$FONT_AWESOME_SOLID_TTF_PATH"
+    else
+        echo "Error: curl or wget not found. Please install one to download fonts."
+    fi
+    if [[ ! -f "$FONT_AWESOME_SOLID_TTF_PATH" ]]; then
+        echo "Error: Failed to download Font Awesome Solid ttf."
+    else
+        echo "Font Awesome Solid ttf downloaded successfully."
+    fi
+else
+    echo "Font Awesome Solid ttf already exists."
+fi
 
 # Clone vcpkg if it doesn't exist
 if [[ ! -d "$VCPKG_DIR" ]]; then

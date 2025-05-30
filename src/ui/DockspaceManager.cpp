@@ -1,6 +1,7 @@
 #include "ui/DockspaceManager.h"
 #include "utils/Logger.h"
 #include "ui/UIState.h"
+#include "core/SDLApp.h"
 
 namespace LocalTether::UI {
     void DockspaceManager::CreateDockspace(bool* p_open) 
@@ -60,6 +61,7 @@ namespace LocalTether::UI {
                 
                 if (ImGui::MenuItem("Exit", "Alt+F4")) 
                 {
+                    LocalTether::Core::SDLApp::GetInstance().Quit();
                     if (p_open) *p_open = false;
                 }
                 
@@ -83,7 +85,7 @@ namespace LocalTether::UI {
                 ImGui::MenuItem("Example Panel", NULL, &LocalTether::UI::show_example_panel);
                 ImGui::MenuItem("Network Settings", NULL, &LocalTether::UI::show_network_settings);
                 ImGui::MenuItem("Console", NULL, &LocalTether::UI::show_console);
-                ImGui::MenuItem("Properties", NULL, &LocalTether::UI::show_properties);
+                ImGui::MenuItem("Controls", NULL, &LocalTether::UI::show_controls_panel);
                 ImGui::EndMenu();
             }
             
@@ -151,7 +153,7 @@ namespace LocalTether::UI {
 
             ImGuiID dock_right_bottom_id = ImGui::DockBuilderSplitNode(dock_right_id, ImGuiDir_Down, 0.4f, nullptr, &dock_right_id);
 
-            ImGui::DockBuilderDockWindow("File Explorer", dock_left_id);
+            ImGui::DockBuilderDockWindow("File Explorer (Server Storage)", dock_main_id);
             ImGui::DockBuilderDockWindow("Network Settings", dock_left_id);
             ImGui::DockBuilderDockWindow("Example Panel", dock_main_id);
             ImGui::DockBuilderDockWindow("Console", dock_bottom_id);
@@ -161,7 +163,7 @@ namespace LocalTether::UI {
             ImGui::DockBuilderDockWindow("Join Setup", dock_main_id);
             ImGui::DockBuilderDockWindow("Generating Server Assets", dock_main_id);
 
-            ImGui::DockBuilderDockWindow("Pause Key Combo Settings", dock_right_bottom_id);
+            ImGui::DockBuilderDockWindow("Session Controls", dock_right_bottom_id);
 
             ImGui::DockBuilderFinish(dockspace_id);
         }

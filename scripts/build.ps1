@@ -1,5 +1,12 @@
 $ErrorActionPreference = 'Stop'
 
+
+try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+} catch {
+    Write-Warning "Could not set TLS 1.2. Depending on your PowerShell version and .NET Framework, this might be an issue for some downloads."
+    Write-Warning "Error: $($_.Exception.Message)"
+}
 Set-Location -Path $PSScriptRoot
 
 $rootDir = Resolve-Path "$PSScriptRoot\.."
@@ -48,6 +55,8 @@ $env:PATH = "$env:VCPKG_ROOT;$env:PATH"
 
 $externalBaseDir = "$PSScriptRoot\..\external"
 $imguiDir = Join-Path $externalBaseDir "imgui"
+$assetsDir = Join-Path $rootDir "assets"      
+$fontsDir = Join-Path $assetsDir "fonts"
 
 if (!(Test-Path $imguiDir)) {
     Write-Host "Cloning Dear ImGui (docking branch)..."
@@ -72,7 +81,46 @@ if (-not (Test-Path $externalBaseDir)) {
     Write-Host "Creating directory: $externalBaseDir"
     New-Item -ItemType Directory -Path $externalBaseDir | Out-Null
 }
+if (-not (Test-Path $assetsDir)) {
+    Write-Host "Creating directory: $assetsDir"
+    New-Item -ItemType Directory -Path $assetsDir | Out-Null
+}
+if (-not (Test-Path $fontsDir)) {
+    Write-Host "Creating directory: $fontsDir"
+    New-Item -ItemType Directory -Path $fontsDir | Out-Null
+}
 
+$creamSodeTtfUrl = "https://github.com/google/fonts/raw/refs/heads/main/ofl/ibmplexmono/IBMPlexMono-Regular.ttf"
+$creamSodeTtfPath = Join-Path $fontsDir "IBMPlexMono-Regular.ttf"
+
+$fontAwesomeSolidTtfUrl = "https://github.com/FortAwesome/Font-Awesome/raw/6.x/webfonts/fa-solid-900.ttf" # Using FA6 solid
+$fontAwesomeSolidTtfPath = Join-Path $fontsDir "fa-solid-900.ttf"
+
+# Download Open Sans Regular if it doesn't exist
+if (-not (Test-Path $creamSodeTtfPath)) {
+    Write-Host "Downloading IBMPlexMono-Regular.ttf..."
+    try {
+        Invoke-WebRequest -Uri $creamSodeTtfUrl -OutFile $creamSodeTtfPath
+        Write-Host "IBMPlexMono-Regular.ttf downloaded successfully."
+    } catch {
+        Write-Error "Failed to download IBMPlexMono-Regular.ttf: $($_.Exception.Message)"
+    }
+} else {
+    Write-Host "IBMPlexMono-Regular.ttf already exists."
+}
+
+# Download Font Awesome Solid if it doesn't exist
+if (-not (Test-Path $fontAwesomeSolidTtfPath)) {
+    Write-Host "Downloading Font Awesome Solid ttf..."
+    try {
+        Invoke-WebRequest -Uri $fontAwesomeSolidTtfUrl -OutFile $fontAwesomeSolidTtfPath
+        Write-Host "Font Awesome Solid ttf downloaded successfully."
+    } catch {
+        Write-Error "Failed to download Font Awesome Solid ttf: $($_.Exception.Message)"
+    }
+} else {
+    Write-Host "Font Awesome Solid ttf already exists."
+}
 
 cmake $rootDir `
   -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" `

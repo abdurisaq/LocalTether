@@ -653,7 +653,26 @@ void Client::handleMessage(const Message& message) {
         }
         return;  
     }
-    
+    if (message.getType() == MessageType::Command) {
+        std::string commandText = message.getTextPayload();
+        LocalTether::Utils::Logger::GetInstance().Debug("Client received command: " + commandText);
+        if (commandText.rfind("you_were_renamed:", 0) == 0) {
+            std::string newName = commandText.substr(17);
+            LocalTether::Utils::Logger::GetInstance().Info("Server renamed this client to: " + newName);
+            clientName_ = newName;  
+        } else if (commandText.rfind("client_renamed:", 0) == 0) {
+             
+             
+             
+            LocalTether::Utils::Logger::GetInstance().Info("Server announced client rename: " + commandText);
+        } else if (commandText == "server_shutdown_imminent") {
+            LocalTether::Utils::Logger::GetInstance().Info("Server is shutting down. Disconnecting.");
+             
+             
+             
+        }
+        
+    }
      
     if (messageHandler_) {
         messageHandler_(message);

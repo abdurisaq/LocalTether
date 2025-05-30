@@ -15,7 +15,7 @@ namespace LocalTether::UI {
     bool show_file_explorer = true;
     bool show_console = true;
     bool show_properties = true;
-    bool show_pause_settings = true;
+    bool show_controls_panel = true;
 
     std::atomic<bool> server_setup_in_progress{false};
     std::atomic<bool> server_setup_success{false};

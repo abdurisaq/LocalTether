@@ -83,6 +83,8 @@ set(SOURCES
 # Create executable
 add_executable(LocalTether ${SOURCES} ${IMGUI_SOURCES})
 
+target_compile_definitions(LocalTether PRIVATE "PROJECT_ROOT_DIR_CMAKE=\"${CMAKE_SOURCE_DIR}\"")
+
 if(UNIX AND NOT APPLE)
   
     if(LIBEVDEV_FOUND) 

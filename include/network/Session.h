@@ -42,6 +42,9 @@ public:
     void setClientName(const std::string& name) { clientName_ = name; }
     bool isAppHandshakeComplete() const { return appHandshakeComplete_.load(); }
     void setAppHandshakeComplete(bool status) { appHandshakeComplete_.store(status); }
+
+    bool getCanReceiveInput() const { return canReceiveInput_; }
+    void setCanReceiveInput(bool canReceive) { canReceiveInput_ = canReceive; }
 private:
     void doSslHandshake();
     void handleSslHandshake(const std::error_code& error);
@@ -80,6 +83,8 @@ private:
     DisconnectHandler disconnectHandler_;
 
     std::string remoteAddressString_;
+
+    std::atomic<bool> canReceiveInput_{true};
 };
 
 }  

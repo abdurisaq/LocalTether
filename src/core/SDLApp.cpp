@@ -1,7 +1,9 @@
 #include "core/SDLApp.h"
 #include "ui/StyleManager.h"
 #include "utils/Logger.h"
+#include "ui/Icons.h"
 #include <iostream>
+#include <filesystem>  
 
 
 namespace LocalTether::Core {
@@ -19,7 +21,7 @@ SDLApp::~SDLApp() {
 }
 
 bool SDLApp::Initialize() {
-    //logging to see which driver is used
+     
     std::cout << "Available SDL video drivers:" << std::endl;
     for (int i = 0; i < SDL_GetNumVideoDrivers(); i++) {
         std::cout << " - " << SDL_GetVideoDriver(i) << std::endl;
@@ -42,7 +44,7 @@ bool SDLApp::Initialize() {
     std::cout << "Using video driver: " << SDL_GetCurrentVideoDriver() << std::endl;
 
 
-    //3.2 version
+     
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
@@ -90,13 +92,38 @@ bool SDLApp::Initialize() {
     ImGui::CreateContext();
     io = &ImGui::GetIO();
     
-    #ifdef _WIN32
-    io->Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\segoeui.ttf", 18.0f);
-    #else
-        io->Fonts->AddFontFromFileTTF("/usr/share/fonts/open-sans/OpenSans-Regular.ttf", 18.0f); //for now hardcoded, add to build system later donwloading font
-    #endif
+    std::string project_root_str = PROJECT_ROOT_DIR_CMAKE;
+    std::filesystem::path project_root_path(project_root_str);
     
-    // Enable docking 
+    std::filesystem::path primary_font_fs_path = project_root_path / "assets" / "fonts" / "IBMPlexMono-Regular.ttf";
+    std::filesystem::path fa_font_fs_path = project_root_path / "assets" / "fonts" / "fa-solid-900.ttf";  
+
+    float font_size = 18.0f;
+
+    if (std::filesystem::exists(primary_font_fs_path)) {
+        io->Fonts->AddFontFromFileTTF(primary_font_fs_path.string().c_str(), font_size);  
+        Utils::Logger::GetInstance().Info("Loaded primary font: " + primary_font_fs_path.string());
+    } else {
+        Utils::Logger::GetInstance().Error("Primary font not found at: " + primary_font_fs_path.string() + ". Using ImGui default.");
+        io->Fonts->AddFontDefault();  
+    }
+
+     
+    if (std::filesystem::exists(fa_font_fs_path)) {
+        ImFontConfig font_config;
+        font_config.MergeMode = true;  
+        font_config.PixelSnapH = true;
+         
+        
+        static const ImWchar icons_ranges[] = { ICON_MIN_FA, ICON_MAX_FA, 0 };
+        
+        io->Fonts->AddFontFromFileTTF(fa_font_fs_path.string().c_str(), font_size * 0.85f, &font_config, icons_ranges);
+        Utils::Logger::GetInstance().Info("Loaded and merged icon font: " + fa_font_fs_path.string());
+    } else {
+        Utils::Logger::GetInstance().Error("Icon font (Font Awesome) not found at: " + fa_font_fs_path.string());
+    }
+    
+     
     io->ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     io->ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
     io->ConfigViewportsNoAutoMerge = true;

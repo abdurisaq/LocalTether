@@ -310,6 +310,41 @@ void Server::handleMessage(std::shared_ptr<Session> session, const Message& mess
     }
 }
 
+void Server::processLimitedCommand(std::shared_ptr<Session> session, const Message& message) {
+    if (!session) return;
+    std::string commandText = message.getTextPayload();
+    LocalTether::Utils::Logger::GetInstance().Info("Client " + session->getClientName() + " sent limited command: " + commandText);
+     
+    if (commandText == "request_host_info") {
+        HandshakePayload hostInfoPayload;
+        hostInfoPayload.role = ClientRole::Host;  
+        hostInfoPayload.clientName = (hostClientId_ != 0 && !sessions_.empty()) ? 
+                                     (std::find_if(sessions_.begin(), sessions_.end(), 
+                                         [this](const auto& s){ return s->getClientId() == hostClientId_; })
+                                         != sessions_.end() ? 
+                                         (*std::find_if(sessions_.begin(), sessions_.end(), 
+                                         [this](const auto& s){ return s->getClientId() == hostClientId_; }))->getClientName() 
+                                         : "Host")
+                                     : "No Host";
+        hostInfoPayload.clientId = hostClientId_;
+        hostInfoPayload.hostScreenWidth = hostScreenWidth_;
+        hostInfoPayload.hostScreenHeight = hostScreenHeight_;
+        auto response = Message::createHandshake(hostInfoPayload, 0);
+        LocalTether::Utils::Logger::GetInstance().Info(
+            "Responding to limited command 'request_host_info' from client " + session->getClientName() + 
+            " (ID: " + std::to_string(session->getClientId()) + 
+            ") with host info: " + hostInfoPayload.clientName);
+        session->send(response);
+    } else {
+        LocalTether::Utils::Logger::GetInstance().Warning("Unknown limited command from client: " + commandText);
+        auto reply = Message::createCommand("unknown_limited_command: " + commandText, 0);
+        LocalTether::Utils::Logger::GetInstance().Warning(
+            "Client " + session->getClientName() + " (ID: " + std::to_string(session->getClientId()) + 
+            ") sent unknown limited command: " + commandText);
+        session->send(reply);
+    }
+}
+
 void Server::processHandshake(std::shared_ptr<Session> session, const Message& message) {
     if (!session) return;
     try {
@@ -449,8 +484,8 @@ void Server::broadcastToReceivers(const Message& message) {
         std::lock_guard<std::mutex> lock(sessions_mutex_);
         for(const auto& s : sessions_) {
              
-            if(s && s->isAppHandshakeComplete() && 
-               (s->getRole() == LocalTether::Network::ClientRole::Receiver || s->getRole() == LocalTether::Network::ClientRole::Broadcaster)) { 
+            if(s && s->isAppHandshakeComplete() &&  s->getCanReceiveInput() &&
+               (s->getRole() == LocalTether::Network::ClientRole::Receiver || s->getRole() == LocalTether::Network::ClientRole::Broadcaster) ) { 
                 currentSessions.push_back(s);
             }
         }
@@ -495,6 +530,15 @@ void Server::broadcastExcept(const Message& message, std::shared_ptr<Session> ex
 void Server::processCommand(std::shared_ptr<Session> session, const Message& message) {
     if (!session) return;
     std::string commandText = message.getTextPayload();
+     
+    if (session->getClientId() != hostClientId_) {
+        LocalTether::Utils::Logger::GetInstance().Warning(
+            "Client " + session->getClientName() + " (ID: " + std::to_string(session->getClientId()) +
+            ") attempted to send host-only command: " + commandText);
+         
+        return;
+    }
+
     LocalTether::Utils::Logger::GetInstance().Info("Host " + session->getClientName() + " sent command: " + commandText);
 
     if (commandText == "shutdown_server") {  
@@ -502,54 +546,106 @@ void Server::processCommand(std::shared_ptr<Session> session, const Message& mes
         auto shutdownMsg = Message::createCommand("server_shutdown_imminent", 0);
         broadcast(shutdownMsg);  
         
-         
-        asio::post(io_context_, [this]() {
+        asio::post(io_context_, [this]() {  
             std::this_thread::sleep_for(std::chrono::milliseconds(500));  
             stop();
         });
-    }
-     
-    else {
-        LocalTether::Utils::Logger::GetInstance().Warning("Unknown command from host: " + commandText);
-        auto reply = Message::createCommand("unknown_command: " + commandText, 0);
-        LocalTether::Utils::Logger::GetInstance().Warning(
-            "Host " + session->getClientName() + " (ID: " + std::to_string(session->getClientId()) + 
-            ") sent unknown command: " + commandText);
-        session->send(reply);
-    }
-}
-
-void Server::processLimitedCommand(std::shared_ptr<Session> session, const Message& message) {
-    if (!session) return;
-    std::string commandText = message.getTextPayload();
-    LocalTether::Utils::Logger::GetInstance().Info("Client " + session->getClientName() + " sent limited command: " + commandText);
-     
-    if (commandText == "request_host_info") {
-        HandshakePayload hostInfoPayload;
-        hostInfoPayload.role = ClientRole::Host;  
-        hostInfoPayload.clientName = (hostClientId_ != 0 && !sessions_.empty()) ? 
-                                     (std::find_if(sessions_.begin(), sessions_.end(), 
-                                         [this](const auto& s){ return s->getClientId() == hostClientId_; })
-                                         != sessions_.end() ? 
-                                         (*std::find_if(sessions_.begin(), sessions_.end(), 
-                                         [this](const auto& s){ return s->getClientId() == hostClientId_; }))->getClientName() 
-                                         : "Host")
-                                     : "No Host";
-        hostInfoPayload.clientId = hostClientId_;
-        hostInfoPayload.hostScreenWidth = hostScreenWidth_;
-        hostInfoPayload.hostScreenHeight = hostScreenHeight_;
-        auto response = Message::createHandshake(hostInfoPayload, 0);
-        LocalTether::Utils::Logger::GetInstance().Info(
-            "Responding to limited command 'request_host_info' from client " + session->getClientName() + 
-            " (ID: " + std::to_string(session->getClientId()) + 
-            ") with host info: " + hostInfoPayload.clientName);
-        session->send(response);
+    } else if (commandText.rfind("kick_client:", 0) == 0) {
+        try {
+            uint32_t clientIdToKick = std::stoul(commandText.substr(12));
+            std::shared_ptr<Session> sessionToKick = nullptr;
+            {
+                std::lock_guard<std::mutex> lock(sessions_mutex_);
+                for (const auto& s_ptr : sessions_) {
+                    if (s_ptr->getClientId() == clientIdToKick) {
+                        sessionToKick = s_ptr;
+                        break;
+                    }
+                }
+            }
+            if (sessionToKick && clientIdToKick != hostClientId_) {  
+                LocalTether::Utils::Logger::GetInstance().Info("Host commanded kick for client ID: " + std::to_string(clientIdToKick));
+                sessionToKick->close();  
+            } else if (clientIdToKick == hostClientId_) {
+                LocalTether::Utils::Logger::GetInstance().Warning("Host attempted to kick itself. Action denied.");
+            } else {
+                LocalTether::Utils::Logger::GetInstance().Warning("Kick command: Client ID " + std::to_string(clientIdToKick) + " not found.");
+            }
+        } catch (const std::exception& e) {
+            LocalTether::Utils::Logger::GetInstance().Error("Error processing kick_client command: " + std::string(e.what()));
+        }
+    } else if (commandText.rfind("rename_client:", 0) == 0) {
+         
+        try {
+            size_t first_colon = commandText.find(':');
+            size_t second_colon = commandText.find(':', first_colon + 1);
+            if (first_colon != std::string::npos && second_colon != std::string::npos) {
+                uint32_t clientIdToRename = std::stoul(commandText.substr(first_colon + 1, second_colon - (first_colon + 1)));
+                std::string newName = commandText.substr(second_colon + 1);
+                
+                if (newName.length() > 0 && newName.length() < 64) {  
+                    std::shared_ptr<Session> sessionToRename = nullptr;
+                    {
+                        std::lock_guard<std::mutex> lock(sessions_mutex_);
+                        for (const auto& s_ptr : sessions_) {
+                            if (s_ptr->getClientId() == clientIdToRename) {
+                                sessionToRename = s_ptr;
+                                break;
+                            }
+                        }
+                    }
+                    if (sessionToRename) {
+                        std::string oldName = sessionToRename->getClientName();
+                        sessionToRename->setClientName(newName);
+                        LocalTether::Utils::Logger::GetInstance().Info("Client ID " + std::to_string(clientIdToRename) + " renamed from '" + oldName + "' to '" + newName + "' by host.");
+                         
+                        sessionToRename->send(Message::createCommand("you_were_renamed:" + newName, 0));
+                         
+                        broadcast(Message::createCommand("client_renamed:" + std::to_string(clientIdToRename) + ":" + newName, 0));
+                    } else {
+                         LocalTether::Utils::Logger::GetInstance().Warning("Rename command: Client ID " + std::to_string(clientIdToRename) + " not found.");
+                    }
+                } else {
+                     LocalTether::Utils::Logger::GetInstance().Warning("Rename command: Invalid new name provided.");
+                }
+            }
+        } catch (const std::exception& e) {
+            LocalTether::Utils::Logger::GetInstance().Error("Error processing rename_client command: " + std::string(e.what()));
+        }
+    } else if (commandText.rfind("toggle_input_client:", 0) == 0) {
+         
+        try {
+            size_t first_colon = commandText.find(':');
+            size_t second_colon = commandText.find(':', first_colon + 1);
+            if (first_colon != std::string::npos && second_colon != std::string::npos) {
+                uint32_t clientIdToToggle = std::stoul(commandText.substr(first_colon + 1, second_colon - (first_colon + 1)));
+                std::string stateStr = commandText.substr(second_colon + 1);
+                bool newState = (stateStr == "true");
+                std::shared_ptr<Session> sessionToToggle = nullptr;
+                {
+                    std::lock_guard<std::mutex> lock(sessions_mutex_);
+                    for (const auto& s_ptr : sessions_) {
+                        if (s_ptr->getClientId() == clientIdToToggle) {
+                            sessionToToggle = s_ptr;
+                            break;
+                        }
+                    }
+                }
+                if (sessionToToggle && sessionToToggle->getRole() == ClientRole::Receiver) {
+                    sessionToToggle->setCanReceiveInput(newState);
+                    LocalTether::Utils::Logger::GetInstance().Info("Input for client ID " + std::to_string(clientIdToToggle) + " set to " + (newState ? "ENABLED" : "DISABLED") + " by host.");
+                } else if (sessionToToggle) {
+                     LocalTether::Utils::Logger::GetInstance().Warning("Toggle input: Client ID " + std::to_string(clientIdToToggle) + " is not a Receiver. Action denied.");
+                } else {
+                     LocalTether::Utils::Logger::GetInstance().Warning("Toggle input command: Client ID " + std::to_string(clientIdToToggle) + " not found.");
+                }
+            }
+        } catch (const std::exception& e) {
+            LocalTether::Utils::Logger::GetInstance().Error("Error processing toggle_input_client command: " + std::string(e.what()));
+        }
     } else {
-        LocalTether::Utils::Logger::GetInstance().Warning("Unknown limited command from client: " + commandText);
-        auto reply = Message::createCommand("unknown_limited_command: " + commandText, 0);
-        LocalTether::Utils::Logger::GetInstance().Warning(
-            "Client " + session->getClientName() + " (ID: " + std::to_string(session->getClientId()) + 
-            ") sent unknown limited command: " + commandText);
+        LocalTether::Utils::Logger::GetInstance().Warning("Unknown command from host: " + commandText);
+        auto reply = Message::createCommand("unknown_command:" + commandText, 0);
         session->send(reply);
     }
 }
@@ -637,6 +733,14 @@ size_t Server::getConnectionCount() const {
 
 uint16_t Server::getPort() const {
     return port_;
+}
+
+std::vector<std::shared_ptr<LocalTether::Network::Session>> Server::getSessions() const {
+    std::lock_guard<std::mutex> lock(sessions_mutex_);
+    return sessions_;  
+}
+uint32_t Server::getHostClientId() const {
+    return hostClientId_;
 }
 
 }  

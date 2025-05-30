@@ -4,8 +4,7 @@
 #include "ui/panels/ConsolePanel.h"
 #include "ui/panels/FileExplorerPanel.h"
 #include "ui/panels/NetworkSettingsPanel.h"
-#include "ui/panels/PropertiesPanel.h"
-#include "ui/panels/PauseSettingsPanel.h"
+#include "ui/panels/ControlsPanel.h"
 #include "utils/ScanNetwork.h"
 #include "network/Message.h"
 #include "network/Server.h" 
@@ -406,26 +405,21 @@ void ShowJoinSetupPanel() {
   LocalTether::UI::Panels::ConsolePanel consolePanel;
   LocalTether::UI::Panels::FileExplorerPanel fileExplorer;
   LocalTether::UI::Panels::NetworkSettingsPanel networkSettings;
-  LocalTether::UI::Panels::PropertiesPanel properties;
-  LocalTether::UI::Panels::PauseSettingsPanel pauseSettings;
+  
+  LocalTether::UI::Panels::ControlsPanel controls;
 
 void ShowHostDashboard() {
-    consolePanel.Show();
-    fileExplorer.Show();
-    networkSettings.Show();
-    properties.Show();
-    auto& client = LocalTether::UI::getClient();
-    if (client.getInputManager()) {
-        pauseSettings.Show(&LocalTether::UI::show_pause_settings, client.getInputManager());
-    }
+    consolePanel.Show(&LocalTether::UI::show_console);  
+    fileExplorer.Show(&LocalTether::UI::show_file_explorer);  
+    networkSettings.Show(&LocalTether::UI::show_network_settings);  
+    controls.Show(&LocalTether::UI::show_controls_panel);
+    
 }
 
 void ShowClientDashboard() {
-    consolePanel.Show();
-    networkSettings.Show();
-    auto& client = LocalTether::UI::getClient();
-    if (client.getInputManager()) {
-        pauseSettings.Show(&LocalTether::UI::show_pause_settings, client.getInputManager());
-    }
+    consolePanel.Show(&LocalTether::UI::show_console);  
+    networkSettings.Show(&LocalTether::UI::show_network_settings);  
+    controls.Show(&LocalTether::UI::show_controls_panel);
+    
 }
 }

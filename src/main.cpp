@@ -5,7 +5,7 @@
 #include "ui/panels/ConsolePanel.h"
 #include "ui/panels/FileExplorerPanel.h"
 #include "ui/panels/NetworkSettingsPanel.h"
-#include "ui/panels/PropertiesPanel.h"
+#include "ui/panels/ControlsPanel.h"
 #include "utils/Logger.h"
 #include "input/InputManager.h"
 #include "input/LinuxInputHelper.h"
@@ -72,8 +72,7 @@ int main(int argc, char** argv) {
     LT::UI::Panels::ConsolePanel consolePanel;
     LT::UI::Panels::FileExplorerPanel fileExplorerPanel;
     LT::UI::Panels::NetworkSettingsPanel networkSettingsPanel;
-    LT::UI::Panels::PropertiesPanel propertiesPanel;
-
+    LT::UI::Panels::ControlsPanel controlsPanel;
     
     LocalTether::Utils::Logger::GetInstance().Info("--- Application Main Started ---");
 

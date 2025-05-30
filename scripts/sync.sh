@@ -115,7 +115,7 @@ process_event() {
 
 RSYNC_CMD=(rsync -a)
 for exclude in "${EXCLUDE_DIRS[@]}"; do
-    RSYNC_CMD+=(--exclude "/$exclude")
+    RSYNC_CMD+=(--exclude "/$exclude/")
 done
 RSYNC_CMD+=("$WATCHED_DIR/" "$WINDOWS_DIR/")
 "${RSYNC_CMD[@]}"
@@ -128,7 +128,7 @@ inotifywait -m -r -e modify,create,delete,move,moved_to,moved_from "$WATCHED_DIR
         FULLPATH="${path}${file}"
         RELEVANTPATH=${FULLPATH:${WATCHED_DIR_LENGTH}}
         for exclude in "${EXCLUDE_DIRS[@]}"; do
-            if [[ "$RELEVANTPATH" == */"$exclude"* ]]; then
+            if [[ "$RELEVANTPATH" == */"$exclude/"* ]]; then
                 echo "Skipping excluded path: $RELEVANTPATH" >> "$LOG_FILE"
                 continue 2 
             fi

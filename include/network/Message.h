@@ -25,7 +25,7 @@ enum class MessageType : uint8_t {
      
 };
 
-enum class ClientRole : uint8_t {
+enum class ClientRole : unsigned char {
     Broadcaster,    
     Receiver,       
     Host            

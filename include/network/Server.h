@@ -56,6 +56,9 @@ public:
 
     size_t getConnectionCount() const;
     void removeSession(std::shared_ptr<Session> session);
+
+    std::vector<std::shared_ptr<Session>> getSessions() const;
+    uint32_t getHostClientId() const;
     
     std::string password;
     bool localNetworkOnly;
