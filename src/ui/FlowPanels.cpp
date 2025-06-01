@@ -415,10 +415,12 @@ namespace LocalTether::UI::Flow {
                         LocalTether::UI::app_mode = LocalTether::UI::AppMode::ConnectedAsClient;
                         LocalTether::Utils::Logger::GetInstance().Info("Connected to server. Assigned ID: " + std::to_string(assignedId) + ". Msg: " + message);
                     } else {
+                        UI::resetServerInstance(); 
+                        UI::app_mode = UI::AppMode::None;  
                         LocalTether::Utils::Logger::GetInstance().Error("Failed to connect to server: " + message);
                     }
                 });
-                client_ref.setMessageHandler([](const LocalTether::Network::Message& msg) { /* Basic handler */ });
+                client_ref.setMessageHandler([](const LocalTether::Network::Message& msg) { });
                 client_ref.setDisconnectHandler([](const std::string& reason) {  
                     LocalTether::UI::app_mode = LocalTether::UI::AppMode::None;
                     LocalTether::Utils::Logger::GetInstance().Info("Disconnected from server: " + reason);

@@ -23,8 +23,8 @@ enum class MessageType : uint8_t {
         FileSystemUpdate,
         FileRequest,
         FileUpload,       
-        FileData,        // New: For sending actual file content chunks (or whole file)
-        FileResponse,    // New: Server sends file content to client
+        FileData,        
+        FileResponse,    
         FileError,
         Unknown
     };
@@ -125,7 +125,7 @@ public:
 
      static constexpr size_t MIN_MESSAGE_LENGTH = 5;  
     static constexpr size_t HEADER_LENGTH = 9;       
-    static constexpr uint32_t MAX_BODY_LENGTH = 1024 * 1024 * 4;  
+    static constexpr uint64_t MAX_BODY_LENGTH = 5368709120ULL;
 
      
     Message();  
@@ -184,7 +184,7 @@ public:
 private:
     MessageType type_;
     uint32_t clientId_;  
-    uint32_t bodySize_;  
+    uint64_t bodySize_;  
     std::vector<uint8_t> body_;
 };
 

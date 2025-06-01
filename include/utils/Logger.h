@@ -27,7 +27,7 @@ namespace LocalTether::Utils {
         void Critical(const std::string& message);
         void Trace(const std::string& message);
        
-        const std::vector<std::string>& GetLogs() const;
+        std::vector<std::string> GetLogs();
 
         static std::string getKeyName(uint8_t vkCode);
 

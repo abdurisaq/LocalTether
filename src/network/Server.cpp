@@ -208,7 +208,7 @@ void Server::doAccept() {
                 asio::ip::tcp::endpoint remote_endpoint = socket.remote_endpoint(ec);
                 if (ec) {
                     LocalTether::Utils::Logger::GetInstance().Error("Failed to get remote endpoint: " + ec.message());
-                    // Continue to accept next connection
+                    
                     if (state_ == ServerState::Running || state_ == ServerState::Starting) {
                         doAccept();
                     }
@@ -217,7 +217,7 @@ void Server::doAccept() {
                 std::string remote_ip_str = remote_endpoint.address().to_string();
 
                 if (this->localNetworkOnly) {
-                    // Allow loopback for the internal host client
+                    
                     if (remote_ip_str != "127.0.0.1" && remote_ip_str.rfind("192.168.", 0) != 0 && remote_ip_str.rfind("172.16.", 0) != 0) {
                         LocalTether::Utils::Logger::GetInstance().Warning(
                             "Connection refused from " + remote_ip_str +
@@ -225,7 +225,7 @@ void Server::doAccept() {
                         asio::error_code close_ec;
                         socket.shutdown(asio::ip::tcp::socket::shutdown_both, close_ec);
                         socket.close(close_ec);
-                        // Continue to accept next connection
+                        
                         if (state_ == ServerState::Running || state_ == ServerState::Starting) {
                             doAccept();
                         }

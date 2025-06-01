@@ -24,12 +24,12 @@ namespace LocalTether::Network {
 Message::Message() : type_(MessageType::Unknown), clientId_(0), bodySize_(0) {}
 
 Message::Message(MessageType type, uint32_t clientId, const std::vector<uint8_t>& body)
-    : type_(type), clientId_(clientId), bodySize_(static_cast<uint32_t>(body.size())), body_(body) {}
+    : type_(type), clientId_(clientId), bodySize_(static_cast<uint64_t>(body.size())), body_(body) {}
 
 Message::Message(MessageType type, uint32_t clientId, const std::string& textPayload)
     : type_(type), clientId_(clientId) {
     body_.assign(textPayload.begin(), textPayload.end());
-    bodySize_ = static_cast<uint32_t>(body_.size());
+    bodySize_ = static_cast<uint64_t>(body_.size());
 }
 
 MessageType Message::getType() const {
@@ -58,12 +58,12 @@ void Message::setClientId(uint32_t clientId) {
 
 void Message::setBody(const std::vector<uint8_t>& body) {
     body_ = body;
-    bodySize_ = static_cast<uint32_t>(body_.size());
+    bodySize_ = static_cast<uint64_t>(body_.size());
 }
 
 void Message::setBody(const uint8_t* data, size_t length) {
     body_.assign(data, data + length);
-    bodySize_ = static_cast<uint32_t>(length);
+    bodySize_ = static_cast<uint64_t>(length);
 }
 
 std::vector<uint8_t> Message::serialize() const {
@@ -245,6 +245,10 @@ Message Message::createFileUpload(const std::string& serverRelativePath, const s
     return Message(MessageType::FileUpload, senderId, body);
 }
 Message Message::createFileResponse(const std::string& relativePath, const std::vector<char>& fileContent, uint32_t senderId) {
+    
+    if (fileContent.size() > MAX_BODY_LENGTH - (relativePath.length() + 1)) { 
+        throw std::runtime_error("File content too large for a single message in createFileResponse");
+    }
     std::vector<uint8_t> body;
      
     body.insert(body.end(), relativePath.begin(), relativePath.end());

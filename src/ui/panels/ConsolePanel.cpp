@@ -10,6 +10,9 @@ namespace LocalTether::UI::Panels {
     }
     
     void ConsolePanel::Show(bool* p_open) {
+        if (p_open && !*p_open) { 
+            return;
+        }
         ImGui::Begin("Console", nullptr);
         
         if (ImGui::Button("Clear")) {
@@ -57,7 +60,7 @@ namespace LocalTether::UI::Panels {
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4, 1)); 
         
          
-        const auto& logs_from_logger = LocalTether::Utils::Logger::GetInstance().GetLogs();
+        std::vector<std::string> logs_from_logger = LocalTether::Utils::Logger::GetInstance().GetLogs();
    
         for (const auto& item : logs_from_logger) {  
             ImVec4 color = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);  

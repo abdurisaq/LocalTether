@@ -126,22 +126,25 @@ void Session::doWrite() {
         return;
     }
 
-    std::vector<uint8_t> data_to_send;
+    std::shared_ptr<std::vector<uint8_t>> data_to_send_ptr; 
     {
         std::lock_guard<std::mutex> lock(writeMutex_);
         if (writeQueue_.empty()) {
             writing_ = false;  
             return;
         }
-        writing_ = true;  
-        data_to_send = std::move(writeQueue_.front());
-         
+        writing_ = true;
+        
+        data_to_send_ptr = std::make_shared<std::vector<uint8_t>>(std::move(writeQueue_.front()));
+        
     }
 
     auto self = shared_from_this();
-    asio::async_write(socket_, asio::buffer(data_to_send),
-        [this, self, data_sent_size = data_to_send.size()](const std::error_code& error, size_t bytes_transferred) {
-             
+    
+    
+    asio::async_write(socket_, asio::buffer(*data_to_send_ptr),
+        [this, self, data_to_send_ptr](const std::error_code& error, size_t bytes_transferred) {
+            
             handleWrite(error, bytes_transferred);
         });
 }
@@ -151,6 +154,9 @@ void Session::handleWrite(const std::error_code& error, size_t /*bytes_transferr
     bool should_continue_writing = false;
     {
         std::lock_guard<std::mutex> lock(writeMutex_);
+        
+        
+        
         if (!writeQueue_.empty()) {  
              writeQueue_.pop();  
         }
@@ -165,7 +171,6 @@ void Session::handleWrite(const std::error_code& error, size_t /*bytes_transferr
             writing_ = false;  
             LocalTether::Utils::Logger::GetInstance().Error(
                 "Session write error for Client ID " + std::to_string(clientId_) + " (" + remoteAddressString_ + "): " + error.message());
-             
         }
     }  
 
@@ -176,8 +181,6 @@ void Session::handleWrite(const std::error_code& error, size_t /*bytes_transferr
              writing_ = false;  
         }
     } else if (error) {
-          
-          
          doClose("write error: " + error.message());
     }
 }

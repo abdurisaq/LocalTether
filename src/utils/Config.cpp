@@ -203,7 +203,7 @@ namespace LocalTether::Utils {
                         std::stringstream ss_value(value_str);
                         int vk_code_int;
                         while (ss_value >> vk_code_int) {
-                            if (vk_code_int > 0 && vk_code_int < 255) { // VK codes are 1-254
+                            if (vk_code_int > 0 && vk_code_int < 255) { 
                                 parsed_combo.push_back(static_cast<uint8_t>(vk_code_int));
                             } else {
                                 Logger::GetInstance().Warning("Config::Get: Invalid value " + std::to_string(vk_code_int) + " while parsing string for key '" + key + "'");

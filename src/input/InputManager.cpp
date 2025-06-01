@@ -32,7 +32,7 @@ void InputManager::processSimulatedMouseCoordinates(float payloadX, float payloa
         "), anchorDev(" + std::to_string(anchorDevX_val) + "," + std::to_string(anchorDevY_val) + ")"
     );
     
-    if (payloadX < 0.0f || payloadY < 0.0f) { /* ... */ return; }
+    if (payloadX < 0.0f || payloadY < 0.0f) { return; }
 
     if (sourceDeviceType == Network::InputSourceDeviceType::TRACKPAD_ABSOLUTE) {
         LocalTether::Utils::Logger::GetInstance().Debug("SimMouseProc: Applying TRACKPAD_ABSOLUTE logic.");

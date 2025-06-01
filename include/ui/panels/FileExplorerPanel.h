@@ -25,30 +25,36 @@ namespace LocalTether::Network {
 
 namespace LocalTether::UI::Panels {
 
+    enum class FileSyncState {
+        SyncedWithServer, 
+        LocalCacheOnly,   
+        ServerOnly        
+    };
+
     std::filesystem::path get_executable_directory();
     std::filesystem::path find_ancestor_directory(const std::filesystem::path& start_path, const std::string& target_dir_name, int max_depth);
 
 
     struct FileMetadata {
         std::string name;
-        std::string fullPath;
-        std::string relativePath;
-        bool isDirectory;
-        uint64_t size;
+        std::string fullPath;      
+        std::string relativePath;  
+        bool isDirectory = false;
+        uintmax_t size = 0;
         std::chrono::system_clock::time_point modifiedTime;
         std::vector<FileMetadata> children;
+        
+        
+        FileSyncState syncState = FileSyncState::ServerOnly; 
+        bool isCachedLocally = false;                      
 
-        FileMetadata() : isDirectory(false), size(0) {}
-
-        template <class Archive>
-        void serialize(Archive & ar) {
-            ar(CEREAL_NVP(name),
-               CEREAL_NVP(fullPath),
-               CEREAL_NVP(relativePath),
-               CEREAL_NVP(isDirectory),
-               CEREAL_NVP(size),
-               CEREAL_NVP(modifiedTime),
-               CEREAL_NVP(children));
+        template<class Archive>
+        void serialize(Archive & archive) {
+            
+            
+            archive(CEREAL_NVP(name), CEREAL_NVP(fullPath), CEREAL_NVP(relativePath),
+                    CEREAL_NVP(isDirectory), CEREAL_NVP(size),
+                    CEREAL_NVP(modifiedTime), CEREAL_NVP(children));
         }
     };
     

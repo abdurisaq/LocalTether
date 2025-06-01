@@ -462,7 +462,7 @@ void Client::doWrite() {
         return;
     }
 
-    std::vector<uint8_t> data_to_send;
+    std::shared_ptr<std::vector<uint8_t>> data_to_send_ptr; 
     {
         std::lock_guard<std::mutex> lock(writeMutex_);
         if (writeQueue_.empty()) {
@@ -470,21 +470,27 @@ void Client::doWrite() {
             return;
         }
         writing_ = true;
-        data_to_send = std::move(writeQueue_.front());
+        
+        data_to_send_ptr = std::make_shared<std::vector<uint8_t>>(std::move(writeQueue_.front()));
+        
     }
 
-    asio::async_write(*socket_opt_, asio::buffer(data_to_send),  
-        [this](const std::error_code& error, size_t bytes_transferred) {
+    
+    
+    asio::async_write(*socket_opt_, asio::buffer(*data_to_send_ptr),  
+        [this, data_to_send_ptr](const std::error_code& error, size_t bytes_transferred) {
+            
             handleWrite(error, bytes_transferred);
         });
 }
 
-void Client::handleWrite(const std::error_code& error, size_t /*bytes_transferred*/) {
+void Client::handleWrite(const std::error_code& error, size_t bytes_transferred) {
     if (!socket_opt_) { writing_ = false; return; }
 
     bool should_continue_writing = false;
     {
         std::lock_guard<std::mutex> lock(writeMutex_);
+        
         if (!writeQueue_.empty()) {
              writeQueue_.pop();
         }
@@ -642,8 +648,11 @@ void Client::handleRead(const std::error_code& error, size_t bytes_transferred) 
 void Client::handleMessage(const Message& message) {
     LocalTether::Utils::Logger::GetInstance().Trace("Client::handleMessage: Received message type: " + Message::messageTypeToString(message.getType()));
 
+    ClientState currentState = state_.load();
+
+
     if (message.getType() == MessageType::Handshake) {
-        if (state_.load() == ClientState::Connecting) {
+        if (currentState == ClientState::Connecting) {
             try {
                 HandshakePayload serverResponsePayload = message.getHandshakePayload();
                 hostScreenWidth_ = serverResponsePayload.hostScreenWidth;
@@ -688,17 +697,32 @@ void Client::handleMessage(const Message& message) {
             } catch (const std::exception& e) {
                  LocalTether::Utils::Logger::GetInstance().Error("Error processing handshake payload: " + std::string(e.what()));
                  setState(ClientState::Error); lastError_ = "Handshake processing error";
-                 doClose("handshake processing error", true);
+                 if (connectHandler_) connectHandler_(false, lastError_, 0); 
+                 doClose("handshake processing error", true); 
             }
         } else {
              LocalTether::Utils::Logger::GetInstance().Warning("Received Handshake message in unexpected state: " + std::to_string(static_cast<int>(state_.load())));
         }
         return;  
     }
-    
+    if (currentState == ClientState::Connecting && message.getType() == MessageType::Command) {
+        std::string commandText = message.getTextPayload();
+        LocalTether::Utils::Logger::GetInstance().Debug("Client (Connecting) received command: " + commandText);
+        if (commandText == "auth_failed") {
+            LocalTether::Utils::Logger::GetInstance().Error("Authentication failed. Server rejected connection.");
+            setState(ClientState::Error); 
+            lastError_ = "Authentication failed";
+            if (connectHandler_) {
+                connectHandler_(false, "Authentication failed", 0);
+            }
+            return; 
+        }
+
+    }
      
-    if (state_.load() != ClientState::Connected) {
+    if (currentState != ClientState::Connected) {
         LocalTether::Utils::Logger::GetInstance().Warning("Client::handleMessage: Received non-handshake message while not connected. Type: " + Message::messageTypeToString(message.getType()));
+
         return;
     }
 
